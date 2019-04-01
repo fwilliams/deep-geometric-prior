@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from sample_mesh import poisson_disk_sample
+from point_cloud_utils import sample_mesh_poisson_disk
 import json
 import os
 
@@ -40,21 +40,24 @@ def meshgrid_from_lloyd_ts(model_ts, n, scale=1.0):
     return meshgrid_vertices(n, urange=urange, vrange=vrange)
 
 
-def load_mesh_by_file_extension(file_name, compute_normals=False):
-    import point_sampling_utils as psu
+def load_point_cloud_by_file_extension(file_name, compute_normals=False):
+    import point_cloud_utils as pcu
     if file_name.endswith(".obj"):
-        v, f, n = psu.read_obj(file_name, dtype=np.float32)
+        v, f, n = pcu.read_obj(file_name, dtype=np.float32)
     elif file_name.endswith(".off"):
-        v, f, n = psu.read_off(file_name, dtype=np.float32)
+        v, f, n = pcu.read_off(file_name, dtype=np.float32)
+    elif file_name.endswith(".ply"):
+        v, f, n, _ = pcu.read_ply(file_name, dtype=np.float32)
     elif file_name.endswith(".npts"):
         v, n = load_srb_range_scan(file_name)
         f = []
     else:
-        raise ValueError("Input mesh file must end in .obj or .off")
+        raise ValueError("Invalid file extension must be one of .obj, .off, .ply, or .npts")
 
     if compute_normals and f.shape[0] > 0:
-        n = psu.per_vertex_normals(v, f)
-    return v, f, n
+        print("Computing normals...")
+        n = pcu.per_vertex_normals(v, f)
+    return v, n
 
 
 def srb_to_ply(srb_filename, ply_filename):
@@ -190,7 +193,7 @@ def downsample_point_cloud(point_cloud, normals, target_num_pts, max_iters=4096,
         num_iters = 0
         while not (pts_range[0] <= Pdown.shape[0] <= pts_range[1]):
             mid = radius_range[0] + 0.5 * (radius_range[1] - radius_range[0])
-            Pdown, Ndown = poisson_disk_sample(V, F, N, radius=mid)
+            Pdown, Ndown = sample_mesh_poisson_disk(V, F, N, radius=mid)
 
             if Pdown.shape[0] < pts_range[0]:
                 radius_range[1] = mid
@@ -210,26 +213,6 @@ def downsample_point_cloud(point_cloud, normals, target_num_pts, max_iters=4096,
         raise RuntimeError("Failed to downsample point cloud. Try again")
 
     return Pdown, Ndown
-
-
-def set_intersection(P1, P2, eps=1e-10, return_indices=False):
-    """
-    Given two sets of d-dimensional points P_up and P_down of shape [n_up, d], [n_down, d] respectively, find the
-    intersection of the two sets. Two points p_1 and p_2 are deemed equal if the 2-norm distance between them is
-    less than eps
-    :param P1: The first set of shape [n1, d] where each row P1[i, :] is a point
-    :param P2: The second set of shape [n2, d] where each row P1[i, :] is a point
-    :param eps: The L2-norm threshold to determine if two points are equal
-    :param return_indices: If set to true, return the indices into P1 of intersecting points
-    :return: The intersection of P1 and P2
-    """
-    # M[i, j] is the distance between P1[i, :] and P2[j, :]
-    M = np.power(
-        P1.reshape([P1.shape[0], 1, P1.shape[1]]) -
-        P2.reshape([1, P2.shape[0], P2.shape[1]]), 2).sum(axis=2)
-    matches = np.argmin(M, axis=0)  # matches[i] is the closest vertex to Pdown[i]
-    assert np.max(np.linalg.norm(P1[matches, :] - P2, axis=1)) < eps
-    return matches if return_indices else P1[matches, :]
 
 
 def surface_area(v, f):
