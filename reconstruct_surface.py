@@ -1,4 +1,5 @@
 import argparse
+import copy
 
 import torch
 import torch.nn as nn
@@ -11,6 +12,9 @@ from scipy.spatial import KDTree
 
 
 class MLP(nn.Module):
+    """
+    A simple fully connected network mapping vectors in dimension in_dim to vectors in dimension out_dim
+    """
     def __init__(self, in_dim: int, out_dim: int):
         super().__init__()
         self.in_dim = in_dim
@@ -123,7 +127,7 @@ def plot_patches(x, patch_idx):
     mlab.show()
 
 
-def fit_two_phase():
+def main():
     argparser = argparse.ArgumentParser()
     argparser.add_argument("mesh_filename", type=str, help="Point cloud to reconstruct")
     argparser.add_argument("radius", type=float, help="Patch radius (The parameter, r, in the paper)")
@@ -145,7 +149,19 @@ def fit_two_phase():
     argparser.add_argument("--output", "-o", type=str, default="out.pt",
                            help="Destination to save the output reconstruction. Note, the file produced by this script "
                                 "is not a mesh or a point cloud. To construct a dense point cloud, see upsample.py.")
+    argparser.add_argument("--seed", "-s", type=int, default=-1,
+                           help="Random seed to use when initializing network weights. "
+                                "If the seed not positive, a seed is selected at random.")
     args = argparser.parse_args()
+
+    # We'll populate this dictionary and save it as output
+    output_dict = {
+        "pre_cycle_consistency_model": None,
+        "final_model": None,
+        "patch_uvs": None,
+        "patch_idx": None,
+        "seed": utils.seed_everything(args.seed),
+    }
 
     # Read a point cloud and normals from a file, center it about its mean, and align it along its principle vectors
     x, n = utils.load_point_cloud_by_file_extension(args.mesh_filename, compute_normals=False)
@@ -157,6 +173,8 @@ def fit_two_phase():
     bbox_diag = np.linalg.norm(np.max(x, axis=0) - np.min(x, axis=0))
     patch_idx, patch_uvs = compute_patches(x, n, args.radius*bbox_diag, args.padding, args.angle_threshold, args.device)
     num_patches = len(patch_uvs)
+    output_dict["patch_uvs"] = patch_uvs
+    output_dict["patch_idx"] = patch_idx
     plot_patches(x, patch_idx)
 
     # Initialize one model per patch and convert the input data to a pytorch tensor
@@ -191,6 +209,8 @@ def fit_two_phase():
         print("%d: [Total = %0.5f] [Mean = %0.5f]" % (epoch, sum_loss, sum_loss / num_patches))
         optimizer.step()
 
+    output_dict["pre_cycle_consistency_model"] = copy.deepcopy(phi.parameters())
+
     # Compute explicit correspondences between the uv samples for each patch and the points in the point cloud. We
     # will use these correspondences to do a second fitting stage to make the patches agree on common points.
     # The correspondences are stored in a list, pi where pi[i] is a vector of integers used to permute the points in a
@@ -224,7 +244,7 @@ def fit_two_phase():
                 x_avg[idx_i] = (y_i[pi_i] + counts_i * x_avg[idx_i]) / (counts_i + 1)
                 counts[idx_i] += 1
 
-    evaluate(patch_uvs, phi, scale=1.0 / args.radius)
+    evaluate(patch_uvs, phi, scale=1.0 / args.padding)
 
     # Do a second, global, stage of fitting where we ask all patches to agree with each other on overlapping points.
     # This is possible since now have correspondences
@@ -250,8 +270,10 @@ def fit_two_phase():
         print("%d: [Total = %0.5f] [Mean = %0.5f]" % (epoch, sum_loss, sum_loss / num_patches))
         optimizer.step()
 
-    evaluate(patch_uvs, phi, scale=1.0 / args.radius)
+    output_dict["final_model"] = copy.deepcopy(phi.parameters())
+
+    evaluate(patch_uvs, phi, scale=1.0 / args.padding)
 
 
 if __name__ == "__main__":
-    fit_two_phase()
+    main()

@@ -3,6 +3,7 @@ import torch
 from point_cloud_utils import sample_mesh_poisson_disk
 import json
 import os
+import random
 
 
 def meshgrid_face_indices(cols, rows=-1):
@@ -287,6 +288,22 @@ def isnan(x):
     :return: True if x contains NaNs
     """
     return bool(torch.max(torch.isnan(x)) > 0)
+
+
+def seed_everything(seed):
+    """
+    Seed all the RNGs that are used by the programs in this repository
+    :param seed: The random seed to use. If non-positive, a seed is chosen at random
+    :return: The seed used for the RNGs
+    """
+    if seed < 0:
+        seed = np.random.randint(np.iinfo(np.int32).max)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+    return seed
 
 
 class ValueOrRandomRange(object):
