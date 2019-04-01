@@ -33,13 +33,20 @@ Simply run the following from the root of the repository:
 conda env create -f environment.yml
 ```
   
+This will create a conda environment named `deep-surface-prior` with all the correct dependencies installed. You can activate the environment by running:
+```
+conda activate deep-surface-prior
+```
+
+Note: this code will not work on Windows due to lack of support by the [Point Cloud Utils](https://github.com/fwilliams/point_cloud_utils) dependency. 
+
 ### Installing Dependencies Manually (Not Recommended)
 If you are not using Conda, you can manually install the following dependencies:
 - Python 3.6 or later
 - PyTorch 1.0
 - NumPy
 - SciPy
-- [fml](https://github.com/fwilliams/fml) >=0.1
-- [point_cloud_utils](https://github.com/fwilliams/point_cloud_utils) >= 0.52
+- [FML](https://github.com/fwilliams/fml) >=0.1
+- [Point Cloud Utils](https://github.com/fwilliams/point_cloud_utils) >= 0.52
 - Plotly
   
