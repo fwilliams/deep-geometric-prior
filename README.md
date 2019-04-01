@@ -42,11 +42,11 @@ Note: this code will not work on Windows due to lack of support by the [Point Cl
 
 ### Installing Dependencies Manually (Not Recommended)
 If you are not using Conda, you can manually install the following dependencies:
-- Python >= 3.6
+- Python 3.6 (or later)
 - PyTorch 1.0
 - NumPy
 - SciPy
-- [FML](https://github.com/fwilliams/fml) >=0.1
-- [Point Cloud Utils](https://github.com/fwilliams/point_cloud_utils) >= 0.52
+- [FML](https://github.com/fwilliams/fml) 0.1 (or later)
+- [Point Cloud Utils](https://github.com/fwilliams/point_cloud_utils) 0.52 (or later) 
 - Plotly
   
