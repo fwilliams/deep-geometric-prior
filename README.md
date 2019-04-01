@@ -44,8 +44,8 @@ Note: this code will not work on Windows due to lack of support by the [Point Cl
 If you are not using Conda, you can manually install the following dependencies:
 - Python 3.6 (or later)
 - PyTorch 1.0
-- NumPy
-- SciPy
+- NumPy 1.15 (or later)
+- SciPy 1.1.0 (or later)
 - [FML](https://github.com/fwilliams/fml) 0.1 (or later)
 - [Point Cloud Utils](https://github.com/fwilliams/point_cloud_utils) 0.52 (or later) 
 - Plotly
