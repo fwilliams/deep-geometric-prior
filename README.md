@@ -1,6 +1,7 @@
 # Deep Geometric Prior for Surface Reconstruction
+The reference implementaiton for the CVPR 2019 paper [Deep Geometric Prior for Surface Reconstruction](https://arxiv.org/pdf/1811.10943.pdf).
+
 ![](https://github.com/fwilliams/deep-geometric-prior/blob/master/data/teaser.png)
-This repository contains reference implementaiton for the paper [Deep Geometric Prior for Surface Reconstruction](https://arxiv.org/pdf/1811.10943.pdf).
 There are several programs in this repository explained in detail below. The documentation for each program can be seen by running it with the `-h` flag. The code is also extensively commented and should be easy to follow. Please create GitHub issues or reach out to me by email if you run into any problems.
 
 - #### `reconstruct_surface.py`:
