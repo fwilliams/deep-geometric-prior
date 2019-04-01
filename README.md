@@ -42,7 +42,7 @@ Note: this code will not work on Windows due to lack of support by the [Point Cl
 
 ### Installing Dependencies Manually (Not Recommended)
 If you are not using Conda, you can manually install the following dependencies:
-- Python 3.6 or later
+- Python >= 3.6
 - PyTorch 1.0
 - NumPy
 - SciPy
