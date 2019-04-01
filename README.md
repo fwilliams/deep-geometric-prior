@@ -37,8 +37,8 @@ If you are not using Conda, you can manually install the following dependencies:
 - Python 3.6 or later
 - PyTorch 1.0
 - NumPy
-- Scipy
+- SciPy
 - [fml](https://github.com/fwilliams/fml) >=0.1
 - [point_cloud_utils](https://github.com/fwilliams/point_cloud_utils) >= 0.52
-- plotly
+- Plotly
   
