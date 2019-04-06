@@ -9,6 +9,7 @@ import point_cloud_utils as pcu
 
 import utils
 from fml.nn import SinkhornLoss
+from fml.functional import sinkhorn, pairwise_distances
 from scipy.spatial import KDTree
 
 
@@ -35,6 +36,7 @@ from scipy.spatial import KDTree
 #         x = self.relu(self.fc4(x))
 #         x = self.fc5(x)
 #         return x
+
 
 class MLP(nn.Module):
     """
@@ -86,7 +88,9 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
     angle_thresh = np.cos(np.rad2deg(angle_thresh))
 
     patch_indexes = []
-    patch_uvs = []
+    # patch_uvs = []
+
+    max_pts = -np.inf
 
     for i in range(ctr_v.shape[0]):
         patch_i = np.array(kdtree.query_ball_point(ctr_v[i], ball_radius))
@@ -96,12 +100,21 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
         covered_indices = patch_i[np.linalg.norm(x[patch_i] - ctr_v[i], axis=1) < r]
         covered[covered_indices] = True
 
-        uv_i = pcu.lloyd_2d(len(patch_i)).astype(np.float32)
-        patch_indexes.append(torch.from_numpy(patch_i))
-        patch_uvs.append(torch.from_numpy(uv_i).to(device))
+        # uv_i = pcu.lloyd_2d(len(patch_i)).astype(np.float32)
+        patch_indexes.append(patch_i)
+        max_pts = max(max_pts, len(patch_i))
+        # patch_uvs.append(torch.from_numpy(uv_i).to(device))
+
+    patch_positions = torch.zeros(len(patch_i), max_pts, 3)
+    patch_uvs = torch.zeros(len(patch_i), max_pts, 2)
+    patch_masks = torch.zeros(len(patch_i), max_pts)
+    for i in range(ctr_v.shape[0]):
+        patch_positions[i, :len(patch_indexes[i])] = torch.from_numpy(x[patch_indexes[i]])
+        patch_uvs[i, :len(patch_indexes[i])] = torch.from_numpy(pcu.lloyd_2d(len(patch_indexes[i])).astype(np.float32))
+        patch_masks[i, :len(patch_indexes[i])] = torch.ones(len(patch_indexes[i]))
 
     if np.sum(covered) == x.shape[0]:
-        return patch_indexes, patch_uvs
+        return patch_indexes, patch_positions, patch_uvs, patch_masks
     else:
         # TODO: Handle uncovered vertices
         print("There are %d uncovered vertices" % (x.shape[0] - np.sum(covered)))
@@ -194,8 +207,13 @@ def main():
     # of pairs (uv_j, xi_j) where uv_j are 2D uv coordinates for the j^th patch, and xi_j are the indices into x of
     # the j^th patch. We will try to reconstruct a function phi, such that phi(uv_j) = x[xi_j].
     bbox_diag = np.linalg.norm(np.max(x, axis=0) - np.min(x, axis=0))
-    patch_idx, patch_uvs = compute_patches(x, n, args.radius*bbox_diag, args.padding, args.angle_threshold, args.device)
-    num_patches = len(patch_uvs)
+    patch_idx, patch_pos, patch_uvs, patch_masks = \
+        compute_patches(x, n, args.radius*bbox_diag, args.padding, args.angle_threshold, args.device)
+    patch_pos = patch_pos.to(args.device)
+    patch_uvs = patch_uvs.to(args.device)
+    patch_masks = patch_masks.to(args.device)
+
+    num_patches = len(patch_idx)
     output_dict["patch_uvs"] = patch_uvs
     output_dict["patch_idx"] = patch_idx
     # plot_patches(x, patch_idx)
@@ -211,32 +229,35 @@ def main():
     # Fit a function, phi_i, for each patch so that phi_i(patches[i]) = x[patches[i]]. i.e. so that the function
     # phi_i "agrees" with the point cloud on each patch. The use of the Sinkhorn loss makes the fitted patches robust
     # to noisy point clouds.
+    y = torch.zeros_like(patch_pos)
     for epoch in range(args.epochs):
         optimizer.zero_grad()
 
-        patch_losses = []
         sum_loss = 0.0
         start = time.time()
         for i in range(num_patches):
-            idx_i = patch_idx[i]
-            uv_i = patch_uvs[i]
-            x_i = x[idx_i]
-            y_i = phi[i](uv_i)
+            y[i] = phi[i](patch_uvs[i])
 
-            loss_i, p_i = sinkhorn_loss(y_i.unsqueeze(0), x_i.unsqueeze(0))
+        with torch.no_grad():
+            print(patch_pos.shape, y.shape)
+            M = pairwise_distances(y, patch_pos)
+            P = sinkhorn(patch_masks, patch_masks, M, eps=args.sinkhorn_epsilon, max_iters=args.max_sinkhorn_iters)
+            Pi = P.max(1)[1]
 
-            patch_losses.append(loss_i)
-            sum_loss += loss_i.item()
+            for i in range(y.shape[0]):
+                y[i] = y[i][Pi[i]]
 
-        for l in patch_losses:
-            l.backward()
-        end = time.time()
+        loss = mse_loss(y, patch_pos)
 
-        # print("Forward time: %f" % (end_forward - start))
-        # print("Back time: %f" % (end_back-end_forward))
-        # print("Total time: %f" % (end_back - start))
-        print("%d: [Total = %0.5f] [Mean = %0.5f] [Time = %0.3f]" %
-              (epoch, sum_loss, sum_loss / num_patches, end-start))
+        end_forward = time.time()
+
+        loss.backward(retain_graph=True)
+        end_back = time.time()
+
+        print("Forward time: %f" % (end_forward - start))
+        print("Back time: %f" % (end_back-end_forward))
+        print("Total time: %f" % (end_back - start))
+        print("%d: [Total = %0.5f] [Mean = %0.5f]" % (epoch, sum_loss, sum_loss / num_patches))
         optimizer.step()
 
     output_dict["pre_cycle_consistency_model"] = copy.deepcopy(phi.state_dict())

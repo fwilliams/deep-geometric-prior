@@ -56,7 +56,6 @@ def load_point_cloud_by_file_extension(file_name, compute_normals=False):
         raise ValueError("Invalid file extension must be one of .obj, .off, .ply, or .npts")
 
     if compute_normals and f.shape[0] > 0:
-        print("Computing normals...")
         n = pcu.per_vertex_normals(v, f)
     return v, n
 
