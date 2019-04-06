@@ -6,7 +6,7 @@ import torch.nn as nn
 from mayavi import mlab
 
 import utils
-from recon_surf_2 import MLP
+from reconstruct_surface import MLP
 
 
 def evaluate(patch_uvs, patch_tx, patch_models, scale=1.0):
