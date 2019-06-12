@@ -48,5 +48,5 @@ If you are not using Conda, you can manually install the following dependencies:
 - SciPy 1.1.0 (or later)
 - [FML](https://github.com/fwilliams/fml) 0.1 (or later)
 - [Point Cloud Utils](https://github.com/fwilliams/point_cloud_utils) 0.52 (or later) 
-- Plotly
+- [Maxavi](https://docs.enthought.com/mayavi/mayavi/) 4.6.2 (or later)
   
