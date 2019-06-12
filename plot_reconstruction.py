@@ -9,8 +9,9 @@ import utils
 from reconstruct_surface import MLP
 
 
-def evaluate(patch_uvs, patch_tx, patch_models, scale=1.0):
-    mlab.figure(bgcolor=(1.0, 1.0, 1.0))
+def plot_reconstruction(patch_uvs, patch_tx, patch_models, scale=1.0):
+    from mayavi import mlab
+
     with torch.no_grad():
         for i in range(len(patch_models)):
             n = 128
@@ -22,6 +23,7 @@ def evaluate(patch_uvs, patch_tx, patch_models, scale=1.0):
             mesh_v = ((y_i.squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i).cpu().numpy()
             mesh_f = utils.meshgrid_face_indices(n)
             mlab.triangular_mesh(mesh_v[:, 0], mesh_v[:, 1], mesh_v[:, 2], mesh_f, color=(0.2, 0.2, 0.8))
+
         mlab.show()
 
 
@@ -42,7 +44,7 @@ def main():
     else:
         model.load_state_dict(state["final_model"])
 
-    evaluate(state["patch_uvs"], state["patch_txs"], model, scale=args.scale)
+    plot_reconstruction(state["patch_uvs"], state["patch_txs"], model, scale=args.scale)
 
 
 if __name__ == "__main__":

@@ -2,14 +2,15 @@ import argparse
 import copy
 import time
 
+import numpy as np
+import ot
+import point_cloud_utils as pcu
 import torch
 import torch.nn as nn
-import numpy as np
-import point_cloud_utils as pcu
+from fml.nn import SinkhornLoss, pairwise_distances
+from scipy.spatial import KDTree
 
 import utils
-from fml.nn import SinkhornLoss
-from scipy.spatial import KDTree
 
 
 class MLP(nn.Module):
@@ -25,7 +26,7 @@ class MLP(nn.Module):
         self.fc3 = nn.Linear(256, 512)
         self.fc4 = nn.Linear(512, 512)
         self.fc5 = nn.Linear(512, out_dim)
-        self.relu = nn.LeakyReLU()
+        self.relu = nn.ReLU()
 
     def forward(self, x):
         x = self.relu(self.fc1(x))
@@ -33,24 +34,6 @@ class MLP(nn.Module):
         x = self.relu(self.fc3(x))
         x = self.relu(self.fc4(x))
         x = self.fc5(x)
-        return x
-
-
-class MLPUltraShallow(nn.Module):
-    """
-    A single hidden-layer fully-connected network mapping vectors in dimension in_dim to vectors in dimension out_dim
-    """
-    def __init__(self, in_dim: int, out_dim: int):
-        super().__init__()
-        self.in_dim = in_dim
-        self.out_dim = out_dim
-        self.fc1 = nn.Linear(in_dim, 512)
-        self.fc2 = nn.Linear(512, out_dim)
-        self.relu = nn.LeakyReLU()
-
-    def forward(self, x):
-        x = self.relu(self.fc1(x))
-        x = self.fc2(x)
         return x
 
 
@@ -113,7 +96,7 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
 
         patch_transformations.append(transform_i)
         patch_indexes.append(torch.from_numpy(idx_i))
-        patch_uvs.append(torch.from_numpy(uv_i).to(device))
+        patch_uvs.append(torch.tensor(uv_i, device=device, requires_grad=True))
         patch_xs.append(x_i)
 
     for i in range(ctr_v.shape[0]):
@@ -125,13 +108,13 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
         if not covered[i]:
             make_patch(x[i], n[i])
 
-    assert np.sum(covered) == x.shape[0], "There should always be one at least one patch per input vertex"
+    # assert np.sum(covered) == x.shape[0], "There should always be one at least one patch per input vertex"
 
     print("Found %d neighborhoods" % len(patch_indexes))
     return patch_indexes, patch_uvs, patch_xs, patch_transformations
 
 
-def evaluate(patch_uvs, patch_tx, patch_models, scale=1.0):
+def plot_reconstruction(x, patch_uvs, patch_tx, patch_models, scale=1.0):
     from mayavi import mlab
 
     with torch.no_grad():
@@ -145,15 +128,18 @@ def evaluate(patch_uvs, patch_tx, patch_models, scale=1.0):
             mesh_v = ((y_i.squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i).cpu().numpy()
             mesh_f = utils.meshgrid_face_indices(n)
             mlab.triangular_mesh(mesh_v[:, 0], mesh_v[:, 1], mesh_v[:, 2], mesh_f, color=(0.2, 0.2, 0.8))
+
+        mlab.points3d(x[:, 0], x[:, 1], x[:, 2], scale_factor=0.001)
         mlab.show()
 
 
 def plot_patches(x, patch_idx):
     from mayavi import mlab
 
+    mlab.figure(bgcolor=(1, 1, 1))
     for idx_i in patch_idx:
         color = tuple(np.random.rand(3))
-        sf = 0.05 + np.random.randn()*0.005
+        sf = 0.1 + np.random.randn()*0.05
         x_i = x[idx_i]
         mlab.points3d(x_i[:, 0], x_i[:, 1], x_i[:, 2], color=color, scale_factor=sf)
     mlab.show()
@@ -164,6 +150,7 @@ def main():
     argparser.add_argument("mesh_filename", type=str, help="Point cloud to reconstruct")
     argparser.add_argument("radius", type=float, help="Patch radius (The parameter, r, in the paper)")
     argparser.add_argument("padding", type=float, help="Padding factor for patches (The parameter, c, in the paper)")
+    argparser.add_argument("--plot", action="store_true", help="Plot the output when done training")
     argparser.add_argument("--angle-threshold", "-a", type=float, default=95.0,
                            help="Threshold (in degrees) used to discard points in "
                                 "a patch whose normal is facing the wrong way.")
@@ -185,6 +172,10 @@ def main():
     argparser.add_argument("--seed", "-s", type=int, default=-1,
                            help="Random seed to use when initializing network weights. "
                                 "If the seed not positive, a seed is selected at random.")
+    argparser.add_argument("--exact-emd", "-e", action="store_true",
+                           help="Use exact optimal transport distance instead of sinkhorn")
+    argparser.add_argument("--use-best", action="store_true", help="Use the model with the lowest loss")
+
     args = argparser.parse_args()
 
     # We'll populate this dictionary and save it as output
@@ -206,7 +197,6 @@ def main():
 
     # Read a point cloud and normals from a file, center it about its mean, and align it along its principle vectors
     x, n = utils.load_point_cloud_by_file_extension(args.mesh_filename, compute_normals=True)
-    # x, n, tx = normalize_point_cloud(x, n)
 
     # Compute a set of neighborhood (patches) and a uv samples for each neighborhood. Store the result in a list
     # of pairs (uv_j, xi_j) where uv_j are 2D uv coordinates for the j^th patch, and xi_j are the indices into x of
@@ -218,28 +208,33 @@ def main():
     output_dict["patch_uvs"] = patch_uvs
     output_dict["patch_idx"] = patch_idx
     output_dict["patch_txs"] = patch_tx
-    # plot_patches(x, patch_idx)
+
+    if args.plot:
+        plot_patches(x, patch_idx)
 
     # Initialize one model per patch and convert the input data to a pytorch tensor
     phi = nn.ModuleList([MLP(2, 3).to(args.device) for _ in range(num_patches)])
-    # x = torch.from_numpy(x.astype(np.float32)).to(args.device)
+    x = torch.from_numpy(x.astype(np.float32)).to(args.device)
 
     optimizer = torch.optim.Adam(phi.parameters(), lr=args.learning_rate)
     sinkhorn_loss = SinkhornLoss(max_iters=args.max_sinkhorn_iters, return_transport_matrix=True)
     mse_loss = nn.MSELoss()
 
     # Fit a function, phi_i, for each patch so that phi_i(patch_uvs[i]) = x[patch_idx[i]]. i.e. so that the function
-    # phi_i "agrees" with the point cloud on each patch. The use of the Sinkhorn loss makes the fitted patches robust
-    # to noisy point clouds.
+    # phi_i "agrees" with the point cloud on each patch.
     #
-    # We also store the correspondences between the uvs and points which we use later for the cycle consistency. The
+    # We also store the correspondences between the uvs and points which we use later for the consistency step. The
     # correspondences are stored in a list, pi where pi[i] is a vector of integers used to permute the points in
     # a patch.
     pi = [None for _ in range(num_patches)]
+
+    # Cache model with the lowest loss if --use-best is passed
+    best_models = [None for _ in range(num_patches)]
+    best_losses = [np.inf for _ in range(num_patches)]
+
     for epoch in range(args.local_epochs):
         optimizer.zero_grad()
 
-        # patch_losses = []
         sum_loss = torch.tensor([0.0]).to(args.device)
         epoch_start_time = time.time()
         for i in range(num_patches):
@@ -248,15 +243,22 @@ def main():
             y_i = phi[i](uv_i)
 
             with torch.no_grad():
-                _, p_i = sinkhorn_loss(y_i.unsqueeze(0), x_i.unsqueeze(0))
+                if args.exact_emd:
+                    M_i = pairwise_distances(x_i.unsqueeze(0), y_i.unsqueeze(0)).squeeze().cpu().squeeze().numpy()
+                    p_i = ot.emd(np.ones(x_i.shape[0]), np.ones(y_i.shape[0]), M_i)
+                    p_i = torch.from_numpy(p_i.astype(np.float32)).to(args.device)
+                else:
+                    _, p_i = sinkhorn_loss(x_i.unsqueeze(0), y_i.unsqueeze(0))
                 pi_i = p_i.squeeze().max(0)[1]
                 pi[i] = pi_i
 
-            sum_loss += mse_loss(x_i.unsqueeze(0), y_i[pi_i].unsqueeze(0))
+            loss_i = mse_loss(x_i[pi_i].unsqueeze(0), y_i.unsqueeze(0))
 
-            # loss_i, p_i = sinkhorn_loss(y_i.unsqueeze(0), x_i.unsqueeze(0))
-            # pi_i = p_i.detach().squeeze().max(0)[1]
-            # pi[i] = pi_i
+            if args.use_best and loss_i.item() < best_losses[i]:
+                best_losses[i] = loss_i
+                best_models[i] = copy.deepcopy(phi[i].state_dict())
+
+            sum_loss += loss_i
 
         sum_loss.backward()
         epoch_end_time = time.time()
@@ -266,35 +268,21 @@ def main():
                sum_loss.item() / num_patches, epoch_end_time-epoch_start_time))
         optimizer.step()
 
+    if args.use_best:
+        for i, phi_i in enumerate(phi):
+            phi_i.load_state_dict(best_models[i])
+
     output_dict["pre_cycle_consistency_model"] = copy.deepcopy(phi.state_dict())
 
-    evaluate(patch_uvs, patch_tx, phi, scale=0.9)
-
-    # If the user does not specify --interpolate, we compute for each input point, the average of all the patch
-    # predictions which correspond to it. We store these predictions in x_avg which has the same shape as x.
-    # if not args.interpolate:
-    #     with torch.no_grad():
-    #         x_avg = torch.zeros_like(x)
-    #         counts = torch.zeros(x.shape[0]).to(x)
-    #         for i in range(num_patches):
-    #             idx_i = patch_idx[i]
-    #             uv_i = patch_uvs[i]
-    #             y_i = phi[i](uv_i)
-    #             pi_i = pi[i]
-    #             counts_i = counts[idx_i].unsqueeze(1)
-    #             x_avg[idx_i] = (y_i[pi_i] + counts_i * x_avg[idx_i]) / (counts_i + 1)
-    #             counts[idx_i] += 1
-    # else:
-    #     x_avg = x
+    if args.plot:
+        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=0.8)
 
     # Do a second, global, stage of fitting where we ask all patches to agree with each other on overlapping points.
     # If the user passed --interpolate, we ask that the patches agree on the original input points, otherwise we ask
     # that they agree on the average of predictions from patches overlapping a given point.
-    optimizer = torch.optim.Adam(phi.parameters(), lr=args.learning_rate)
     for epoch in range(args.global_epochs):
         optimizer.zero_grad()
 
-        # patch_losses = []
         sum_loss = torch.tensor([0.0]).to(args.device)
         epoch_start_time = time.time()
         for i in range(num_patches):
@@ -302,7 +290,13 @@ def main():
             x_i = patch_xs[i]
             y_i = phi[i](uv_i)
             pi_i = pi[i]
-            sum_loss += mse_loss(x_i.unsqueeze(0), y_i[pi_i].unsqueeze(0))
+            loss_i = mse_loss(x_i[pi_i].unsqueeze(0), y_i.unsqueeze(0))
+
+            if loss_i.item() < best_losses[i]:
+                best_losses[i] = loss_i
+                best_models[i] = copy.deepcopy(phi[i].state_dict())
+
+            sum_loss += loss_i
 
         sum_loss.backward()
         epoch_end_time = time.time()
@@ -312,11 +306,15 @@ def main():
                sum_loss.item() / num_patches, epoch_end_time-epoch_start_time))
         optimizer.step()
 
+    for i, phi_i in enumerate(phi):
+        phi_i.load_state_dict(best_models[i])
+
     output_dict["final_model"] = copy.deepcopy(phi.state_dict())
 
-    evaluate(patch_uvs, patch_tx, phi, scale=0.9)
-
     torch.save(output_dict, args.output)
+
+    if args.plot:
+        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=0.8)
 
 
 if __name__ == "__main__":
