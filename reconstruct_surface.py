@@ -217,6 +217,7 @@ def main():
     x = torch.from_numpy(x.astype(np.float32)).to(args.device)
 
     optimizer = torch.optim.Adam(phi.parameters(), lr=args.learning_rate)
+    uv_optimizer = torch.optim.Adam(patch_uvs, lr=args.learning_rate)
     sinkhorn_loss = SinkhornLoss(max_iters=args.max_sinkhorn_iters, return_transport_matrix=True)
     mse_loss = nn.MSELoss()
 
@@ -234,6 +235,7 @@ def main():
 
     for epoch in range(args.local_epochs):
         optimizer.zero_grad()
+        uv_optimizer.zero_grad()
 
         sum_loss = torch.tensor([0.0]).to(args.device)
         epoch_start_time = time.time()
@@ -267,6 +269,7 @@ def main():
               (epoch, args.local_epochs, sum_loss.item(),
                sum_loss.item() / num_patches, epoch_end_time-epoch_start_time))
         optimizer.step()
+        uv_optimizer.step()
 
     if args.use_best:
         for i, phi_i in enumerate(phi):
@@ -282,6 +285,7 @@ def main():
     # that they agree on the average of predictions from patches overlapping a given point.
     for epoch in range(args.global_epochs):
         optimizer.zero_grad()
+        uv_optimizer.zero_grad()
 
         sum_loss = torch.tensor([0.0]).to(args.device)
         epoch_start_time = time.time()
@@ -305,6 +309,7 @@ def main():
               (epoch, args.global_epochs, sum_loss.item(),
                sum_loss.item() / num_patches, epoch_end_time-epoch_start_time))
         optimizer.step()
+        uv_optimizer.step()
 
     for i, phi_i in enumerate(phi):
         phi_i.load_state_dict(best_models[i])

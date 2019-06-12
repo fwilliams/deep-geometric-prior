@@ -189,8 +189,8 @@ def main():
             print("%d/%d: [Loss = %0.5f] [Time = %0.3f]" %
                   (epoch, args.local_epochs, loss.item(), epoch_end_time-epoch_start_time))
 
-        uv_optimizer.step()
         optimizer.step()
+        uv_optimizer.step()
 
     if args.use_best:
         phi.load_state_dict(best_model)
