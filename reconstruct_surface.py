@@ -37,7 +37,7 @@ class MLP(nn.Module):
         return x
 
 
-def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
+def compute_patches(x, n, r, c, angle_thresh=95.0,  min_pts_per_patch=10, device='cpu'):
     """
     Given an input point cloud, X, compute a set of patches (subsets of X) and parametric samples for those patches.
     Each patch is a cluster of points which lie in a ball of radius c * r and share a similar normal.
@@ -50,6 +50,7 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
     :param c: Each patch will fit inside a ball of radius c * r
     :param angle_thresh: If the normal of a point in a patch differs by greater than angle_thresh degrees from the
                         normal of the point at the center of the patch, it is discarded.
+    :param min_pts_per_patch: The minimum number of points allowed in a patch
     :param device: The device on which the patches are stored
     :return: Two lists, idx and uv, of torch tensors, where uv[i] are the parametric samples (shape = (np, 2)) for
              the i^th patch, and idx[i] are the indexes into x of the points for the i^th patch. i.e. x[idx[i]] are the
@@ -77,7 +78,7 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
         good_normals = np.squeeze(n[idx_i] @ n_ctr.reshape([3, 1]) > angle_thresh)
         idx_i = idx_i[good_normals]
 
-        if len(idx_i) == 0:
+        if len(idx_i) < min_pts_per_patch:
             return
 
         covered_indices = idx_i[np.linalg.norm(x[idx_i] - v_ctr, axis=1) < r]
@@ -86,6 +87,7 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
         uv_i = pcu.lloyd_2d(len(idx_i)).astype(np.float32)
         x_i = x[idx_i].astype(np.float32)
         translate_i = -np.mean(x_i, axis=0)
+
         scale_i = np.array([1.0 / np.max(np.linalg.norm(x_i + translate_i, axis=1))], dtype=np.float32)
         rotate_i, _, _ = np.linalg.svd((x_i + translate_i).T, full_matrices=False)
         transform_i = (torch.from_numpy(translate_i).to(device),
@@ -154,6 +156,8 @@ def main():
     argparser.add_argument("--angle-threshold", "-a", type=float, default=95.0,
                            help="Threshold (in degrees) used to discard points in "
                                 "a patch whose normal is facing the wrong way.")
+    argparser.add_argument("--min-pts-per-patch", "-mp", type=int, default=10,
+                           help="Minimum number of allowed points inside a patch")
     argparser.add_argument("--local-epochs", "-nl", type=int, default=512, help="Number of local fitting iterations")
     argparser.add_argument("--global-epochs", "-ng", type=int, default=1024, help="Number of global fitting iterations")
     argparser.add_argument("--learning-rate", "-lr", type=float, default=1e-3, help="Step size for gradient descent")
@@ -185,6 +189,10 @@ def main():
         "patch_uvs": None,
         "patch_idx": None,
         "patch_txs": None,
+        "radius": args.radius,
+        "padding": args.padding,
+        "min_pts_per_patch": args.min_pts_per_patch,
+        "angle_threshold": args.angle_threshold,
         "interpolate": args.interpolate,
         "global_epochs": args.global_epochs,
         "local_epochs": args.local_epochs,
@@ -203,7 +211,9 @@ def main():
     # the j^th patch. We will try to reconstruct a function phi, such that phi(uv_j) = x[xi_j].
     bbox_diag = np.linalg.norm(np.max(x, axis=0) - np.min(x, axis=0))
     patch_idx, patch_uvs, patch_xs, patch_tx = compute_patches(x, n, args.radius*bbox_diag, args.padding,
-                                                               args.angle_threshold, args.device)
+                                                               angle_thresh=args.angle_threshold,
+                                                               min_pts_per_patch=args.min_pts_per_patch,
+                                                               device=args.device)
     num_patches = len(patch_uvs)
     output_dict["patch_uvs"] = patch_uvs
     output_dict["patch_idx"] = patch_idx
@@ -278,7 +288,7 @@ def main():
     output_dict["pre_cycle_consistency_model"] = copy.deepcopy(phi.state_dict())
 
     if args.plot:
-        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=0.8)
+        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=1.0/args.padding)
 
     # Do a second, global, stage of fitting where we ask all patches to agree with each other on overlapping points.
     # If the user passed --interpolate, we ask that the patches agree on the original input points, otherwise we ask
@@ -319,7 +329,7 @@ def main():
     torch.save(output_dict, args.output)
 
     if args.plot:
-        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=0.8)
+        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=1.0/args.padding)
 
 
 if __name__ == "__main__":

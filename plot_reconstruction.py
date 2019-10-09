@@ -31,7 +31,7 @@ def main():
     argparser = argparse.ArgumentParser()
     argparser.add_argument("state_file", type=str, help="Path to a reconstructed surface state file generated with "
                                                         "`reconstruct_surface.py` or `reconstruct_single_patch.py`")
-    argparser.add_argument("--scale", type=float, default=0.9)
+    argparser.add_argument("--scale", type=float, default=-1.0)
     argparser.add_argument("--pre-consistency", action="store_true",
                            help="Plot the reconstruction using the model generated before the consistency refinement")
     args = argparser.parse_args()
@@ -44,7 +44,11 @@ def main():
     else:
         model.load_state_dict(state["final_model"])
 
-    plot_reconstruction(state["patch_uvs"], state["patch_txs"], model, scale=args.scale)
+    if args.scale < 0.0:
+        scale = 1.0 / state["padding"]
+    else:
+        scale = args.scale
+    plot_reconstruction(state["patch_uvs"], state["patch_txs"], model, scale=scale)
 
 
 if __name__ == "__main__":
