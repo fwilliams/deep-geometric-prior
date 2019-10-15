@@ -53,7 +53,7 @@ If you are not using Conda, you can manually install the following dependencies:
 - [Maxavi](https://docs.enthought.com/mayavi/mayavi/) 4.6.2 (or later)
   
 ## [Surface Reconstruction Benchmark Data](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing)
-The scans, ground truth data and reconstructions from the paper are [available for download here](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing)
+The scans, ground truth data and reconstructions from the paper are [available for download here](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing).
 
 The linked zip archive contains 3 directories:
 * `scans` contains a simulated scan of the models. The scans are generated with the [surface reconstruction benchmark](https://github.com/fwilliams/surface-reconstruction-benchmark).
