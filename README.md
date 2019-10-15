@@ -2,6 +2,11 @@
 The reference implementaiton for the CVPR 2019 paper [Deep Geometric Prior for Surface Reconstruction](https://arxiv.org/pdf/1811.10943.pdf).
 
 ![](https://github.com/fwilliams/deep-geometric-prior/blob/master/data/teaser.png)
+
+## [Benchmark Data](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing)
+The scans, ground truth data and reconstructions from teh paper are [available for download here](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing)
+
+## Code Overview
 There are several programs in this repository explained in detail below. The documentation for each program can be seen by running it with the `-h` flag. The code is also extensively commented and should be easy to follow. Please create GitHub issues or reach out to me by email if you run into any problems.
 
 - #### `reconstruct_surface.py`:
@@ -23,7 +28,7 @@ There are several programs in this repository explained in detail below. The doc
   This can be fed into a standard algorithm such as [Screened Poisson Surface Reconstruction](https://github.com/mkazhdan/PoissonRecon) to extract a triangle mesh.
 
 
-## Dependencies
+## Setting up and Running the Code
   
 ### With [`conda`](https://conda.io/en/latest/) (Recommended)
 All dependencies can be automatically installed with [`conda`](https://conda.io/en/latest/) using the provided `environment.yml`
