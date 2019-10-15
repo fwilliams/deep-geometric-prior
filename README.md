@@ -57,5 +57,5 @@ The scans, ground truth data and reconstructions from the paper are [available f
 
 The linked zip archive contains 3 directories:
 * `scans` contains a simulated scan of the models. The scans are generated with the [surface reconstruction benchmark](https://github.com/fwilliams/surface-reconstruction-benchmark).
-* `ground_truth` contains a dense point cloud for each model sampled from the ground truth surface
-* `our_reconstructions` contains a reconstructed point cloud for each model generated with our method
+* `ground_truth` contains a dense point cloud for each model sampled from the ground truth surface.
+* `our_reconstructions` contains a reconstructed point cloud for each model generated with our method.
