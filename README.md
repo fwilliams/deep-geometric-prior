@@ -50,7 +50,7 @@ If you are not using Conda, you can manually install the following dependencies:
 - SciPy 1.1.0 (or later)
 - [FML](https://github.com/fwilliams/fml) 0.1 (or later)
 - [Point Cloud Utils](https://github.com/fwilliams/point_cloud_utils) 0.52 (or later) 
-- [Maxavi](https://docs.enthought.com/mayavi/mayavi/) 4.6.2 (or later)
+- [Mayavi](https://docs.enthought.com/mayavi/mayavi/) 4.6.2 (or later)
   
 ## [Surface Reconstruction Benchmark Data](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing)
 The scans, ground truth data and reconstructions from the paper are [available for download here](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing).
