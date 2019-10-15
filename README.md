@@ -3,9 +3,6 @@ The reference implementaiton for the CVPR 2019 paper [Deep Geometric Prior for S
 
 ![](https://github.com/fwilliams/deep-geometric-prior/blob/master/data/teaser.png)
 
-## [Benchmark Data](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing)
-The scans, ground truth data and reconstructions from teh paper are [available for download here](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing)
-
 ## Code Overview
 There are several programs in this repository explained in detail below. The documentation for each program can be seen by running it with the `-h` flag. The code is also extensively commented and should be easy to follow. Please create GitHub issues or reach out to me by email if you run into any problems.
 
@@ -55,3 +52,5 @@ If you are not using Conda, you can manually install the following dependencies:
 - [Point Cloud Utils](https://github.com/fwilliams/point_cloud_utils) 0.52 (or later) 
 - [Maxavi](https://docs.enthought.com/mayavi/mayavi/) 4.6.2 (or later)
   
+## [Surface Reconstruction Benchmark Data](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing)
+The scans, ground truth data and reconstructions from teh paper are [available for download here](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing)
