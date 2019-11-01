@@ -152,12 +152,13 @@ def main():
     argparser.add_argument("mesh_filename", type=str, help="Point cloud to reconstruct")
     argparser.add_argument("radius", type=float, help="Patch radius (The parameter, r, in the paper)")
     argparser.add_argument("padding", type=float, help="Padding factor for patches (The parameter, c, in the paper)")
+    argparser.add_argument("min_pts_per_patch", type=int,
+                           help="Minimum number of allowed points inside a patch used to not fit to "
+                                "patches with too little data")
     argparser.add_argument("--plot", action="store_true", help="Plot the output when done training")
     argparser.add_argument("--angle-threshold", "-a", type=float, default=95.0,
                            help="Threshold (in degrees) used to discard points in "
-                                "a patch whose normal is facing the wrong way.")
-    argparser.add_argument("--min-pts-per-patch", "-mp", type=int, default=10,
-                           help="Minimum number of allowed points inside a patch")
+                                "a patch whose normal is facing the wrong way")
     argparser.add_argument("--local-epochs", "-nl", type=int, default=512, help="Number of local fitting iterations")
     argparser.add_argument("--global-epochs", "-ng", type=int, default=1024, help="Number of global fitting iterations")
     argparser.add_argument("--learning-rate", "-lr", type=float, default=1e-3, help="Step size for gradient descent")
