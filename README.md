@@ -1,6 +1,8 @@
 # Deep Geometric Prior for Surface Reconstruction
 The reference implementaiton for the CVPR 2019 paper [Deep Geometric Prior for Surface Reconstruction](https://arxiv.org/pdf/1811.10943.pdf).
 
+#### NOTE: Scripts to reproduce exact results in the paper will be made available soon. To perform comparisons on the surface reconstruction benchmark, use the data [available for download here](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing). 
+
 ![](https://github.com/fwilliams/deep-geometric-prior/blob/master/data/teaser.png)
 
 ## Code Overview
