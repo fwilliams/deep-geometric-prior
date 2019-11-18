@@ -59,7 +59,7 @@ def compute_patches(x, n, r, c, angle_thresh=95.0,  min_pts_per_patch=10, device
 
     covered = np.zeros(x.shape[0], dtype=np.bool)
     n /= np.linalg.norm(n, axis=1, keepdims=True)
-    ctr_v, ctr_n = pcu.sample_point_cloud_poisson_disk(x, n, r, best_choice_sampling=True)
+    ctr_v, ctr_n = pcu.prune_point_cloud_poisson_disk(x, n, r, best_choice_sampling=True)
 
     if len(ctr_v.shape) == 1:
         ctr_v = ctr_v.reshape([1, *ctr_v.shape])
@@ -79,6 +79,7 @@ def compute_patches(x, n, r, c, angle_thresh=95.0,  min_pts_per_patch=10, device
         idx_i = idx_i[good_normals]
 
         if len(idx_i) < min_pts_per_patch:
+            print("Rejecting small patch with %d points" % len(idx_i))
             return
 
         covered_indices = idx_i[np.linalg.norm(x[idx_i] - v_ctr, axis=1) < r]
@@ -100,7 +101,8 @@ def compute_patches(x, n, r, c, angle_thresh=95.0,  min_pts_per_patch=10, device
         patch_indexes.append(torch.from_numpy(idx_i))
         patch_uvs.append(torch.tensor(uv_i, device=device, requires_grad=True))
         patch_xs.append(x_i)
-
+        print("Computed patch with %d points" % x_i.shape[0])
+        
     for i in range(ctr_v.shape[0]):
         make_patch(ctr_v[i], ctr_n[i])
 
