@@ -4,51 +4,43 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-import utils
-from reconstruct_surface import MLP
+from reconstruct_surface import MLP, upsample_surface
 import point_cloud_utils as pcu
-
-def upsample_surface(patch_uvs, patch_tx, patch_models, scale=1.0, num_samples=128):
-    vertices = []
-    normals = []
-    with torch.no_grad():
-        for i in range(len(patch_models)):
-            if (i + 1) % 10 == 0:
-                print("Upsamling %d/%d" % (i+1, len(patch_models)))
-            n = num_samples
-            translate_i, scale_i, rotate_i = patch_tx[i]
-            uv_i = utils.meshgrid_from_lloyd_ts(patch_uvs[i].cpu().numpy(), n, scale=scale).astype(np.float32)
-            uv_i = torch.from_numpy(uv_i).to(patch_uvs[i])
-            y_i = patch_models[i](uv_i)
-
-            mesh_v = ((y_i.squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i).cpu().numpy()
-            mesh_f = utils.meshgrid_face_indices(n)
-            mesh_n = pcu.per_vertex_normals(mesh_v, mesh_f)
-
-            vertices.append(mesh_v)
-            normals.append(mesh_n)
-
-        
-    vertices = np.concatenate(vertices, axis=0).astype(np.float32)
-    normals = np.concatenate(vertices, axis=0).astype(np.float32)
-
-    return vertices, normals
 
 
 def main():
     argparser = argparse.ArgumentParser()
     argparser.add_argument("state_file", type=str, help="Path to a reconstructed surface state file generated with "
                                                         "`reconstruct_surface.py` or `reconstruct_single_patch.py`")
-    argparser.add_argument("--scale", type=float, default=-1.0)
+    argparser.add_argument("--devices", type=str, default="", help="Optionally use different devices to generate the "
+                                                                   "point cloud than were used to compute the original "
+                                                                   "atlas.")
+    argparser.add_argument("--output", "-o", type=str, default="out.ply",
+                           help="Output a dense upsampled point-cloud. The number of points per patch is 8^2 by "
+                                "default and can be set by specifying --upsamples-per-patch. Default: 'out.ply'.")
+    argparser.add_argument("--upsamples-per-patch", "-nup", type=int, default=8,
+                           help="*Square root* of the number of upsamples per patch to generate in the output. i.e. if "
+                                "you pass in --upsamples-per-patch 8, there will be 64 upsamples per patch. "
+                                "Default: 8.")
+    argparser.add_argument("--normal-neighborhood-size", "-ns", type=int, default=64,
+                           help="")
+    argparser.add_argument("--scale", type=float, default=-1.0,
+                           help="Only use scale fraction of the domain [0, 1]^2 to generate points. "
+                                "E.g. if scale is 0.9, then the domain for each patch is [0.05, 0.95]^2. By default, "
+                                "this parameter is 1/c (where c is the padding parameter in reconstruct_surface.py)")
     argparser.add_argument("--pre-consistency", action="store_true",
-                           help="Plot the reconstruction using the model generated before the consistency refinement")
-    argparser.add_argument("--samples-per-patch", "-n", type=int, default=128, help="Number of upsamples per patch")
+                           help="Plot the reconstruction using the model generated before the consistency refinement.")
     args = argparser.parse_args()
 
     print("Loading state...")
     state = torch.load(args.state_file)
+
+    devices = state["devices"]
+    if args.devices:
+        devices = args.devices
+
     print("Creating models...")
-    model = nn.ModuleList([MLP(2, 3).to(state["devices"][i % len(state["devices"])]) for i in range(len(state["patch_idx"]))])
+    model = nn.ModuleList([MLP(2, 3).to(devices[i % len(devices)]) for i in range(len(state["patch_idx"]))])
 
     if args.pre_consistency:
         model.load_state_dict(state["pre_cycle_consistency_model"])
@@ -61,10 +53,12 @@ def main():
         scale = args.scale
 
     print("Generating upsamples...")
-    v, n = upsample_surface(state["patch_uvs"], state["patch_txs"], model, scale=scale,
-                           num_samples=args.samples_per_patch)
+    v, n = upsample_surface(state["patch_uvs"], state["patch_txs"], model, devices,
+                            scale=scale, num_samples=args.upsamples_per_patch,
+                            normal_samples=args.normal_neighborhood_size, compute_normals=False)
 
-    pcu.write_ply("out.ply", v, np.zeros([0, 3], dtype=np.int32), n, np.zeros([1, 2], dtype=v.dtype))
+    print("Saving upsampled cloud...")
+    pcu.write_ply(args.output, v, np.zeros([], dtype=np.int32), n, np.zeros([], dtype=v.dtype))
 
                   
 if __name__ == "__main__":

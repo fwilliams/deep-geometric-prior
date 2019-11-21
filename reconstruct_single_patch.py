@@ -91,8 +91,8 @@ def main():
     argparser = argparse.ArgumentParser()
     argparser.add_argument("mesh_filename", type=str, help="Point cloud to reconstruct")
     argparser.add_argument("--plot", action="store_true", help="Plot the output when done training")
-    argparser.add_argument("--local-epochs", "-nl", type=int, default=512, help="Number of local fitting iterations")
-    argparser.add_argument("--global-epochs", "-ng", type=int, default=1024, help="Number of global fitting iterations")
+    argparser.add_argument("--local-epochs", "-nl", type=int, default=128, help="Number of local fitting iterations")
+    argparser.add_argument("--global-epochs", "-ng", type=int, default=128, help="Number of global fitting iterations")
     argparser.add_argument("--learning-rate", "-lr", type=float, default=1e-3, help="Step size for gradient descent")
     argparser.add_argument("--device", "-d", type=str, default="cuda",
                            help="The device to use when fitting (either 'cpu' or 'cuda')")
@@ -104,7 +104,8 @@ def main():
                            help="The reciprocal (1/lambda) of the sinkhorn regularization parameter.")
     argparser.add_argument("--output", "-o", type=str, default="out.pt",
                            help="Destination to save the output reconstruction. Note, the file produced by this script "
-                                "is not a mesh or a point cloud. To construct a dense point cloud, see upsample.py.")
+                                "is not a mesh or a point cloud. To construct a dense point cloud, "
+                                "see export_point_cloud.py.")
     argparser.add_argument("--seed", "-s", type=int, default=-1,
                            help="Random seed to use when initializing network weights. "
                                 "If the seed not positive, a seed is selected at random.")
