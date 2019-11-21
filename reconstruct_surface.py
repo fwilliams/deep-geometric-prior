@@ -8,7 +8,7 @@ import point_cloud_utils as pcu
 import torch
 import torch.nn as nn
 from fml.nn import SinkhornLoss, pairwise_distances
-from scipy.spatial import KDTree
+from scipy.spatial import cKDTree
 
 import utils
 
@@ -64,7 +64,7 @@ def compute_patches(x, n, r, c, angle_thresh=95.0,  min_pts_per_patch=10, device
     if len(ctr_v.shape) == 1:
         ctr_v = ctr_v.reshape([1, *ctr_v.shape])
         ctr_n = ctr_n.reshape([1, *ctr_n.shape])
-    kdtree = KDTree(x)
+    kdtree = cKDTree(x)
     ball_radius = c * r
     angle_thresh = np.cos(np.deg2rad(angle_thresh))
 
