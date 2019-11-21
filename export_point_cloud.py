@@ -18,7 +18,7 @@ def upsample_surface(patch_uvs, patch_tx, patch_models, scale=1.0, num_samples=1
             n = num_samples
             translate_i, scale_i, rotate_i = patch_tx[i]
             uv_i = utils.meshgrid_from_lloyd_ts(patch_uvs[i].cpu().numpy(), n, scale=scale).astype(np.float32)
-            uv_i = torch.from_numpy(uv_i).to(patch_uvs[0])
+            uv_i = torch.from_numpy(uv_i).to(patch_uvs[i])
             y_i = patch_models[i](uv_i)
 
             mesh_v = ((y_i.squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i).cpu().numpy()
@@ -47,7 +47,8 @@ def main():
 
     print("Loading state...")
     state = torch.load(args.state_file)
-    model = nn.ModuleList([MLP(2, 3).to(state["device"]) for _ in range(len(state["patch_idx"]))])
+    print("Creating models...")
+    model = nn.ModuleList([MLP(2, 3).to(state["devices"][i % len(state["devices"])]) for i in range(len(state["patch_idx"]))])
 
     if args.pre_consistency:
         model.load_state_dict(state["pre_cycle_consistency_model"])

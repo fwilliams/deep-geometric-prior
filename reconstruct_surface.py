@@ -37,7 +37,7 @@ class MLP(nn.Module):
         return x
 
 
-def compute_patches(x, n, r, c, angle_thresh=95.0,  min_pts_per_patch=10, device='cpu'):
+def compute_patches(x, n, r, c, angle_thresh=95.0,  min_pts_per_patch=10, devices=['cpu']):
     """
     Given an input point cloud, X, compute a set of patches (subsets of X) and parametric samples for those patches.
     Each patch is a cluster of points which lie in a ball of radius c * r and share a similar normal.
@@ -89,6 +89,8 @@ def compute_patches(x, n, r, c, angle_thresh=95.0,  min_pts_per_patch=10, device
         x_i = x[idx_i].astype(np.float32)
         translate_i = -np.mean(x_i, axis=0)
 
+        device = devices[len(patch_xs) % len(devices)]
+                
         scale_i = np.array([1.0 / np.max(np.linalg.norm(x_i + translate_i, axis=1))], dtype=np.float32)
         rotate_i, _, _ = np.linalg.svd((x_i + translate_i).T, full_matrices=False)
         transform_i = (torch.from_numpy(translate_i).to(device),
@@ -164,7 +166,7 @@ def main():
     argparser.add_argument("--local-epochs", "-nl", type=int, default=512, help="Number of local fitting iterations")
     argparser.add_argument("--global-epochs", "-ng", type=int, default=1024, help="Number of global fitting iterations")
     argparser.add_argument("--learning-rate", "-lr", type=float, default=1e-3, help="Step size for gradient descent")
-    argparser.add_argument("--device", "-d", type=str, default="cuda",
+    argparser.add_argument("--devices", "-d", type=str, default=["cuda"], nargs="+",
                            help="The device to use when fitting (either 'cpu' or 'cuda')")
     argparser.add_argument("--interpolate", action="store_true",
                            help="If set, then force all patches to agree with the input at overlapping points. "
@@ -200,7 +202,7 @@ def main():
         "global_epochs": args.global_epochs,
         "local_epochs": args.local_epochs,
         "learning_rate": args.learning_rate,
-        "device": args.device,
+        "devices": args.devices,
         "sinkhorn_epsilon": args.sinkhorn_epsilon,
         "max_sinkhorn_iters": args.max_sinkhorn_iters,
         "seed": utils.seed_everything(args.seed),
@@ -216,7 +218,7 @@ def main():
     patch_idx, patch_uvs, patch_xs, patch_tx = compute_patches(x, n, args.radius*bbox_diag, args.padding,
                                                                angle_thresh=args.angle_threshold,
                                                                min_pts_per_patch=args.min_pts_per_patch,
-                                                               device=args.device)
+                                                               devices=args.devices)
     num_patches = len(patch_uvs)
     output_dict["patch_uvs"] = patch_uvs
     output_dict["patch_idx"] = patch_idx
@@ -226,8 +228,8 @@ def main():
         plot_patches(x, patch_idx)
 
     # Initialize one model per patch and convert the input data to a pytorch tensor
-    phi = nn.ModuleList([MLP(2, 3).to(args.device) for _ in range(num_patches)])
-    x = torch.from_numpy(x.astype(np.float32)).to(args.device)
+    phi = nn.ModuleList([MLP(2, 3).to(args.devices[i % len(args.devices)]) for i in range(num_patches)])
+    # x = torch.from_numpy(x.astype(np.float32)).to(args.device)
 
     optimizer = torch.optim.Adam(phi.parameters(), lr=args.learning_rate)
     uv_optimizer = torch.optim.Adam(patch_uvs, lr=args.learning_rate)
@@ -250,7 +252,7 @@ def main():
         optimizer.zero_grad()
         uv_optimizer.zero_grad()
 
-        sum_loss = torch.tensor([0.0]).to(args.device)
+        sum_loss = torch.tensor([0.0]).to(args.devices[0])
         epoch_start_time = time.time()
         for i in range(num_patches):
             uv_i = patch_uvs[i]
@@ -261,7 +263,7 @@ def main():
                 if args.exact_emd:
                     M_i = pairwise_distances(x_i.unsqueeze(0), y_i.unsqueeze(0)).squeeze().cpu().squeeze().numpy()
                     p_i = ot.emd(np.ones(x_i.shape[0]), np.ones(y_i.shape[0]), M_i)
-                    p_i = torch.from_numpy(p_i.astype(np.float32)).to(args.device)
+                    p_i = torch.from_numpy(p_i.astype(np.float32)).to(args.devices[0])
                 else:
                     _, p_i = sinkhorn_loss(x_i.unsqueeze(0), y_i.unsqueeze(0))
                 pi_i = p_i.squeeze().max(0)[1]
@@ -273,7 +275,7 @@ def main():
                 best_losses[i] = loss_i
                 best_models[i] = copy.deepcopy(phi[i].state_dict())
 
-            sum_loss += loss_i
+            sum_loss += loss_i.to(args.devices[0])
 
         sum_loss.backward()
         epoch_end_time = time.time()
@@ -300,7 +302,7 @@ def main():
         optimizer.zero_grad()
         uv_optimizer.zero_grad()
 
-        sum_loss = torch.tensor([0.0]).to(args.device)
+        sum_loss = torch.tensor([0.0]).to(args.devices[0])
         epoch_start_time = time.time()
         for i in range(num_patches):
             uv_i = patch_uvs[i]
@@ -313,7 +315,7 @@ def main():
                 best_losses[i] = loss_i
                 best_models[i] = copy.deepcopy(phi[i].state_dict())
 
-            sum_loss += loss_i
+            sum_loss += loss_i.to(args.devices[0])
 
         sum_loss.backward()
         epoch_end_time = time.time()
