@@ -394,10 +394,12 @@ def main():
 
     print("Generating dense point cloud...")
     v, n = upsample_surface(patch_uvs, patch_tx, phi, args.devices,
-                            scale=1.0/args.padding,
-                            normal_samples=args.normal_neighborhood_size,
+                            scale=(1.0/args.padding),
                             num_samples=args.upsamples_per_patch,
+                            normal_samples=args.normal_neighborhood_size,
                             compute_normals=False)
+
+
     print("Saving dense point cloud...")
     pcu.write_ply(args.output, v, np.zeros([], dtype=np.int32), n, np.zeros([], dtype=v.dtype))
 
