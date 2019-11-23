@@ -195,13 +195,12 @@ def main():
     argparser.add_argument("min_pts_per_patch", type=int,
                            help="Minimum number of allowed points inside a patch used to not fit to "
                                 "patches with too little data")
-    argparser.add_argument("--output", "-o", type=str, default="out.ply",
-                           help="Output a dense upsampled point-cloud. The number of points per patch is 8^2 by "
-                                "default and can be set by specifying --upsamples-per-patch.")
-    argparser.add_argument("--out-meta", "-om", type=str, default="out.pt",
-                           help="Destination to save the output reconstruction metadata. "
-                                "Note, the file specified here is *not* a mesh or a point cloud. "
-                                "To construct a dense point cloud, see --out-mesh and export_point_cloud.py.")
+    argparser.add_argument("--output", "-o", type=str, default="out",
+                           help="Name for the output files: e.g. if you pass in --output out, the program will save "
+                                "a dense upsampled point-cloud named out.ply, and a file containing reconstruction "
+                                "metadata and model weights named out.pt. Default: out -- "
+                                "Note: the number of points per patch in the upsampled point cloud is 64 by default "
+                                "and can be set by specifying --upsamples-per-patch.")
     argparser.add_argument("--upsamples-per-patch", "-nup", type=int, default=8,
                            help="*Square root* of the number of upsamples per patch to generate in the output. i.e. if "
                                 "you pass in --upsamples-per-patch 8, there will be 64 upsamples per patch.")
@@ -243,6 +242,7 @@ def main():
     argparser.add_argument("--normal-neighborhood-size", "-ns", type=int, default=64,
                            help="Neighborhood size used to estimate the normals in the final dense point cloud. "
                                 "Default: 64")
+    argparser.add_argument("--save-pre-cc", action="store_true", help="Save a copy of the model before the cycle consistency step")
 
     args = argparser.parse_args()
 
@@ -351,7 +351,8 @@ def main():
         for i, phi_i in enumerate(phi):
             phi_i.load_state_dict(best_models[i])
 
-    output_dict["pre_cycle_consistency_model"] = copy.deepcopy(phi.state_dict())
+    if args.save_pre_cc:
+        output_dict["pre_cycle_consistency_model"] = copy.deepcopy(phi.state_dict())
 
     if args.plot:
         plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=1.0/args.padding)
@@ -390,7 +391,7 @@ def main():
     for i, phi_i in enumerate(phi):
         phi_i.load_state_dict(best_models[i])
 
-    output_dict["final_model"] = copy.deepcopy(phi.state_dict())
+    output_dict["final_model"] = phi.state_dict()
 
     print("Generating dense point cloud...")
     v, n = upsample_surface(patch_uvs, patch_tx, phi, args.devices,
@@ -401,10 +402,10 @@ def main():
 
 
     print("Saving dense point cloud...")
-    pcu.write_ply(args.output, v, np.zeros([], dtype=np.int32), n, np.zeros([], dtype=v.dtype))
+    pcu.write_ply(args.output + ".ply", v, np.zeros([], dtype=np.int32), n, np.zeros([], dtype=v.dtype))
 
     print("Saving metadata...")
-    torch.save(output_dict, args.out_meta)
+    torch.save(output_dict, args.output + ".pt")
 
     if args.plot:
         plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=1.0/args.padding)
