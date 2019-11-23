@@ -67,10 +67,14 @@ The linked zip archive contains 3 directories:
 * Extract the zip file which should produce a directory named `deep_geometric_prior_data`. 
 * Since Deep Geometric Prior fits many neural networks over a model, it requires a lot of memory (see paper for details), thus it is best to use multiple GPUs when reconstructing a model. Suppose four GPUs are available named `cuda:0`, `cuda:1`, `cuda:2`, and `cuda:3`, then the following five commands will reconstruct the five benchmark models using those GPUs. You can change the list of devices for different configurations:
 ```bash
-python reconstruct_surface.py deep_geometric_prior_data/scans/gargoyle.ply 0.01 1.0 20 -d cuda:0 cuda:1 cuda:2 cuda:3 -nl 25 -ng 25 -o gargoyle                                                                                                                  
-python reconstruct_surface.py deep_geometric_prior_data/scans/dc.ply 0.01 1.0 20 -d cuda:0 cuda:1 cuda:2 cuda:3 -nl 25 -ng 25 -o dc                                                                                                                              
-python reconstruct_surface.py deep_geometric_prior_data/scans/lord_quas.ply 0.01 1.0 10 -d cuda:0 cuda:1 cuda:2 cuda:3 -nl 25 -ng 25 -o lord_quas                                                                                                                
-python reconstruct_surface.py deep_geometric_prior_data/scans/anchor.ply 0.01 1.0 10 -d cuda:0 cuda:1 cuda:2 cuda:3 -nl 25 -ng 25 -o anchor                                                                                                                      
+python reconstruct_surface.py deep_geometric_prior_data/scans/gargoyle.ply 0.01 1.0 20 -d cuda:0 cuda:1 cuda:2 cuda:3 -nl 25 -ng 25 -o gargoyle
+
+python reconstruct_surface.py deep_geometric_prior_data/scans/dc.ply 0.01 1.0 20 -d cuda:0 cuda:1 cuda:2 cuda:3 -nl 25 -ng 25 -o dc
+
+python reconstruct_surface.py deep_geometric_prior_data/scans/lord_quas.ply 0.01 1.0 10 -d cuda:0 cuda:1 cuda:2 cuda:3 -nl 25 -ng 25 -o lord_quas
+
+python reconstruct_surface.py deep_geometric_prior_data/scans/anchor.ply 0.01 1.0 10 -d cuda:0 cuda:1 cuda:2 cuda:3 -nl 25 -ng 25 -o anchor
+
 python reconstruct_surface.py deep_geometric_prior_data/scans/daratech.ply 0.01 1.0 10 -d cuda:0 cuda:1 cuda:2 cuda:3 -nl 25 -ng 25 -o daratech   
 ```
 
