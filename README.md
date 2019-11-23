@@ -62,8 +62,8 @@ The linked zip archive contains 3 directories:
 * `our_reconstructions` contains a reconstructed point cloud for each model generated with our method.
 
 ## Running the Deep Geometric Prior on the Surface Reconstruction Benchmark
-* Make sure to install the project dependencies with conda or manually as described above.
-* Download the [Surface Reconstruction Benchmark Data](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing) (See above section for details).
+* Make sure to install the project dependencies with conda or manually as described [above](https://github.com/fwilliams/deep-geometric-prior#setting-up-and-running-the-code).
+* Download the [Surface Reconstruction Benchmark Data](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing) (See [above](https://github.com/fwilliams/deep-geometric-prior#surface-reconstruction-benchmark-data) section for details).
 * Extract the zip file which should produce a directory named `deep_geometric_prior_data`. 
 * Since Deep Geometric Prior fits many neural networks over a model, it requires a lot of memory (see paper for details), thus it is best to use multiple GPUs when reconstructing a model. Suppose four GPUs are available named `cuda:0`, `cuda:1`, `cuda:2`, and `cuda:3`, then the following five commands will reconstruct the five benchmark models using those GPUs. You can change the list of devices for different configurations:
 ```bash
