@@ -37,7 +37,7 @@ conda env create -f environment.yml
   
 This will create a conda environment named `deep-surface-prior` with all the correct dependencies installed. You can activate the environment by running:
 ```
-conda activate deep-surface-prior
+conda activate deep-geometric-prior
 ```
 
 Note: this code will not work on Windows due to lack of support by the [Point Cloud Utils](https://github.com/fwilliams/point_cloud_utils) dependency. 
@@ -45,7 +45,7 @@ Note: this code will not work on Windows due to lack of support by the [Point Cl
 ### Installing Dependencies Manually (Not Recommended)
 If you are not using Conda, you can manually install the following dependencies:
 - Python 3.6 (or later)
-- PyTorch 1.0
+- PyTorch 1.0 (or later)
 - NumPy 1.15 (or later)
 - SciPy 1.1.0 (or later)
 - [FML](https://github.com/fwilliams/fml) 0.1 (or later)
