@@ -40,8 +40,6 @@ This will create a conda environment named `deep-surface-prior` with all the cor
 conda activate deep-geometric-prior
 ```
 
-Note: this code will not work on Windows due to lack of support by the [Point Cloud Utils](https://github.com/fwilliams/point_cloud_utils) dependency. 
-
 ### Installing Dependencies Manually (Not Recommended)
 If you are not using Conda, you can manually install the following dependencies:
 - Python 3.6 (or later)
@@ -49,7 +47,7 @@ If you are not using Conda, you can manually install the following dependencies:
 - NumPy 1.15 (or later)
 - SciPy 1.1.0 (or later)
 - [FML](https://github.com/fwilliams/fml) 0.1 (or later)
-- [Point Cloud Utils](https://github.com/fwilliams/point_cloud_utils) 0.12.0 (or later) 
+- [Point Cloud Utils](https://github.com/fwilliams/point-cloud-utils) 0.12.0 (or later) 
 - [Mayavi](https://docs.enthought.com/mayavi/mayavi/) 4.6.2 (or later)
 
 
@@ -78,6 +76,6 @@ python reconstruct_surface.py deep_geometric_prior_data/scans/anchor.ply 0.01 1.
 python reconstruct_surface.py deep_geometric_prior_data/scans/daratech.ply 0.01 1.0 10 -d cuda:0 cuda:1 cuda:2 cuda:3 -nl 25 -ng 25 -o daratech   
 ```
 
-*NOTE:* You may need to change the pathss `deep_geometric_prior_data/scans/*.ply` to point to where you extracted the zip file, and you may need to change the device arguments `-d cuda:0 ...` to adapt to your system.
+*NOTE:* You may need to change the paths `deep_geometric_prior_data/scans/*.ply` to point to where you extracted the zip file, and you may need to change the device arguments `-d cuda:0 ...` to adapt to your system.
 
 Each of the above commands produces a `ply` file and `pt` file (e.g. `anchor.ply`, `anchor.pt`). The PLY file contains a dense upsampled point cloud and the PT file contains metadata about the reconstruction. You can use the PT file to perform further operations using example `export_point_cloud.py`. 
