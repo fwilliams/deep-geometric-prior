@@ -120,6 +120,59 @@ def compute_patches(x, n, r, c, angle_thresh=95.0,  min_pts_per_patch=10, device
     return patch_indexes, patch_uvs, patch_xs, patch_transformations
 
 
+def patch_means(patch_pis, patch_uvs, patch_idx, patch_tx, phi, x):
+    """
+    Given a set of charts and pointwise correspondences between charts, compute the mean of the overlapping points in
+    each chart. This is used to denoise the Atlas after each chart has beeen individually fitted.
+    The charts may not agree exactly on their prediction, so we compute the mean predictions of overlapping charts
+    and fit each chart to that mean.
+
+    :param patch_pis: A list of correspondences between the 2D uv samples and the points in a neighborhood
+    :param patch_uvs: A list of tensors, each of shape [n_i, 2] of UV positions for the given patch
+    :param patch_idx: A list of tensors each of shape [n_i] containing the indices of the points in a neighborhood into
+                      the input point-cloud x (of shape [n, 3])
+    :param patch_tx: A list of tuples (t_i, s_i, r_i) of transformations (t_i is a translation, s_i is a scaling, and
+                     r_i is a rotation matrix) which map the points in a neighborhood to a centered and whitened point
+                     set
+    :param phi: A list of neural networks representing the lifting function for each chart in the atlas
+    :param x: A [n, 3] tensor containing the input point cloud
+    :return: A list of tensors, each of shape [n_i, 3] where each tensor is the average prediction of the overlapping
+             charts a the samples
+    """
+    num_patches = len(patch_uvs)
+
+    if isinstance(x, np.ndarray):
+        mean_pts = torch.from_numpy(x).to(patch_uvs[0])
+    elif torch.is_tensor(x):
+        mean_pts = x.clone()
+    else:
+        raise ValueError("Invalid type for x")
+
+    counts = torch.ones(x.shape[0], 1).to(mean_pts)
+
+    for i in range(num_patches):
+        translate_i, scale_i, rotate_i = patch_tx[i]
+
+        uv_i = patch_uvs[i]
+        y_i = ((phi[i](uv_i).squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i)
+        pi_i = patch_pis[i]
+        idx_i = patch_idx[i][pi_i]
+
+        mean_pts[idx_i] += y_i
+        counts[idx_i, :] += 1
+
+    mean_pts = mean_pts / counts
+
+    means = []
+    for i in range(num_patches):
+        idx_i = patch_idx[i]
+        translate_i, scale_i, rotate_i = patch_tx[i]
+        m_i = scale_i * (mean_pts[idx_i] + translate_i) @ rotate_i
+        means.append(m_i)
+
+    return means
+
+
 def upsample_surface(patch_uvs, patch_tx, patch_models, devices, scale=1.0, num_samples=8, normal_samples=64,
                      compute_normals=True):
     vertices = []
@@ -157,6 +210,19 @@ def upsample_surface(patch_uvs, patch_tx, patch_models, devices, scale=1.0, num_
 
 
 def plot_reconstruction(x, patch_uvs, patch_tx, patch_models, scale=1.0):
+    """
+    Plot a dense, upsampled point cloud
+
+    :param x: A [n, 3] tensor containing the input point cloud
+    :param patch_uvs: A list of tensors, each of shape [n_i, 2] of UV positions for the given patch
+    :param patch_tx: A list of tuples (t_i, s_i, r_i) of transformations (t_i is a translation, s_i is a scaling, and
+                     r_i is a rotation matrix) which map the points in a neighborhood to a centered and whitened point
+                     set
+    :param patch_models: A list of neural networks representing the lifting function for each chart in the atlas
+    :param scale: Scale parameter to sample uv values from a smaller or larger subset of [0, 1]^2 (i.e. scale*[0, 1]^2)
+    :return: A list of tensors, each of shape [n_i, 3] where each tensor is the average prediction of the overlapping
+             charts a the samples
+    """
     from mayavi import mlab
 
     with torch.no_grad():
@@ -176,6 +242,12 @@ def plot_reconstruction(x, patch_uvs, patch_tx, patch_models, scale=1.0):
 
 
 def plot_patches(x, patch_idx):
+    """
+    Plot the points in each neighborhood in a different color.
+
+    :param x: A [n, 3] tensor containing the input point cloud
+    :param patch_idx: List of [n_i]-shaped tensors each indexing into x representing the points in a given neighborhood.
+    """
     from mayavi import mlab
 
     mlab.figure(bgcolor=(1, 1, 1))
@@ -183,7 +255,7 @@ def plot_patches(x, patch_idx):
         color = tuple(np.random.rand(3))
         sf = 0.1 + np.random.randn()*0.05
         x_i = x[idx_i]
-        mlab.points3d(x_i[:, 0], x_i[:, 1], x_i[:, 2], color=color, scale_factor=sf)
+        mlab.points3d(x_i[:, 0], x_i[:, 1], x_i[:, 2], color=color, scale_factor=sf, scale_mode="none")
     mlab.show()
 
 
@@ -309,6 +381,7 @@ def main():
     best_models = [None for _ in range(num_patches)]
     best_losses = [np.inf for _ in range(num_patches)]
 
+    print("Training local patches...")
     for epoch in range(args.local_epochs):
         optimizer.zero_grad()
         uv_optimizer.zero_grad()
@@ -360,6 +433,12 @@ def main():
     # Do a second, global, stage of fitting where we ask all patches to agree with each other on overlapping points.
     # If the user passed --interpolate, we ask that the patches agree on the original input points, otherwise we ask
     # that they agree on the average of predictions from patches overlapping a given point.
+    if not args.interpolate:
+        print("Computing patch means...")
+        with torch.no_grad():
+            patch_xs = patch_means(pi, patch_uvs, patch_idx, patch_tx, phi, x)
+
+    print("Training cycle consistency...")
     for epoch in range(args.global_epochs):
         optimizer.zero_grad()
         uv_optimizer.zero_grad()
