@@ -314,7 +314,8 @@ def main():
     argparser.add_argument("--normal-neighborhood-size", "-ns", type=int, default=64,
                            help="Neighborhood size used to estimate the normals in the final dense point cloud. "
                                 "Default: 64")
-    argparser.add_argument("--save-pre-cc", action="store_true", help="Save a copy of the model before the cycle consistency step")
+    argparser.add_argument("--save-pre-cc", action="store_true",
+                           help="Save a copy of the model before the cycle consistency step")
 
     args = argparser.parse_args()
 
@@ -478,7 +479,6 @@ def main():
                             num_samples=args.upsamples_per_patch,
                             normal_samples=args.normal_neighborhood_size,
                             compute_normals=False)
-
 
     print("Saving dense point cloud...")
     pcu.write_ply(args.output + ".ply", v, np.zeros([], dtype=np.int32), n, np.zeros([], dtype=v.dtype))
