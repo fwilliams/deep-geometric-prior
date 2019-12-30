@@ -157,8 +157,8 @@ def patch_means(patch_pis, patch_uvs, patch_idx, patch_tx, phi, x):
         y_i = ((phi[i](uv_i).squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i)
         pi_i = patch_pis[i]
         idx_i = patch_idx[i][pi_i]
-
-        mean_pts[idx_i] += y_i
+        
+        mean_pts[idx_i] += y_i.to(mean_pts)
         counts[idx_i, :] += 1
 
     mean_pts = mean_pts / counts
@@ -167,7 +167,8 @@ def patch_means(patch_pis, patch_uvs, patch_idx, patch_tx, phi, x):
     for i in range(num_patches):
         idx_i = patch_idx[i]
         translate_i, scale_i, rotate_i = patch_tx[i]
-        m_i = scale_i * (mean_pts[idx_i] + translate_i) @ rotate_i
+        device_i = translate_i.device
+        m_i = scale_i * (mean_pts[idx_i].to(device_i) + translate_i) @ rotate_i
         means.append(m_i)
 
     return means
