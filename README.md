@@ -15,10 +15,6 @@ There are several programs in this repository explained in detail below. The doc
   Compute a single surface patch fitted to a point cloud.
 
   As with `reconstruct_surface.py`, this program produces a file (defaulting to `out.pt`) as output which can be used to upsample a point cloud with `export_point_cloud.py`. You can optionally plot the reconstruction with `plot_reconstruction.py`.
-
-   
-- #### `plot_reconstruction.py` 
-  Plots a reconstructed point cloud produced by `reconstruct_surface.py` or `reconstruct_single_patch.py`
    
 - #### `export_point_cloud.py` 
   Exports a dense point cloud from a reconstruction file produced by `reconstruct_surface.py` or `reconstruct_single_patch,py`. 
