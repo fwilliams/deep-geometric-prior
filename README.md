@@ -1,3 +1,5 @@
+**This is a fork of deep-geo-prior repo** with an attempt to train the  N neural networks (each one predicting a 3d patch) in batches on single gpu.
+
 # Deep Geometric Prior for Surface Reconstruction
 The reference implementaiton for the CVPR 2019 paper [Deep Geometric Prior for Surface Reconstruction](https://arxiv.org/pdf/1811.10943.pdf).
 
