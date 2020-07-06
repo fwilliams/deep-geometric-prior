@@ -1,5 +1,7 @@
-**This is a fork of deep-geo-prior repo** with an attempt to train the  N neural networks (each one predicting a 3d patch) in batches on single gpu.
-
+**This is a fork of deep-geo-prior repo** with an attempt to train the  N neural networks (each one predicting a 3d patch) in batches on single gpu. Test it with the following command:
+```shell
+python3  reconst_batches.py deep_geometric_prior_data/scans/lord_quas.ply 0.01 1.0 10 -d cuda:0 -nl 128 -ng 128 -o lord_quas_batched -bs 250
+```
 # Deep Geometric Prior for Surface Reconstruction
 The reference implementaiton for the CVPR 2019 paper [Deep Geometric Prior for Surface Reconstruction](https://arxiv.org/pdf/1811.10943.pdf).
 
