@@ -8,7 +8,7 @@ import point_cloud_utils as pcu
 import torch
 import torch.nn as nn
 from fml.nn import SinkhornLoss, pairwise_distances
-from scipy.spatial import KDTree
+from scipy.spatial import cKDTree
 
 import utils
 
@@ -37,7 +37,7 @@ class MLP(nn.Module):
         return x
 
 
-def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
+def compute_patches(x, n, r, c, angle_thresh=95.0,  min_pts_per_patch=10, devices=('cpu',)):
     """
     Given an input point cloud, X, compute a set of patches (subsets of X) and parametric samples for those patches.
     Each patch is a cluster of points which lie in a ball of radius c * r and share a similar normal.
@@ -50,7 +50,8 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
     :param c: Each patch will fit inside a ball of radius c * r
     :param angle_thresh: If the normal of a point in a patch differs by greater than angle_thresh degrees from the
                         normal of the point at the center of the patch, it is discarded.
-    :param device: The device on which the patches are stored
+    :param min_pts_per_patch: The minimum number of points allowed in a patch
+    :param devices: A list of devices on which to store each patch. Patch i is stored on devices[i % len(devices)].
     :return: Two lists, idx and uv, of torch tensors, where uv[i] are the parametric samples (shape = (np, 2)) for
              the i^th patch, and idx[i] are the indexes into x of the points for the i^th patch. i.e. x[idx[i]] are the
              3D points of the i^th patch.
@@ -58,12 +59,12 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
 
     covered = np.zeros(x.shape[0], dtype=np.bool)
     n /= np.linalg.norm(n, axis=1, keepdims=True)
-    ctr_v, ctr_n = pcu.sample_point_cloud_poisson_disk(x, n, r, best_choice_sampling=True)
+    ctr_v, ctr_n = pcu.prune_point_cloud_poisson_disk(x, n, r, best_choice_sampling=True)
 
     if len(ctr_v.shape) == 1:
         ctr_v = ctr_v.reshape([1, *ctr_v.shape])
         ctr_n = ctr_n.reshape([1, *ctr_n.shape])
-    kdtree = KDTree(x)
+    kdtree = cKDTree(x)
     ball_radius = c * r
     angle_thresh = np.cos(np.deg2rad(angle_thresh))
 
@@ -77,7 +78,8 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
         good_normals = np.squeeze(n[idx_i] @ n_ctr.reshape([3, 1]) > angle_thresh)
         idx_i = idx_i[good_normals]
 
-        if len(idx_i) == 0:
+        if len(idx_i) < min_pts_per_patch:
+            print("Rejecting small patch with %d points" % len(idx_i))
             return
 
         covered_indices = idx_i[np.linalg.norm(x[idx_i] - v_ctr, axis=1) < r]
@@ -86,6 +88,9 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
         uv_i = pcu.lloyd_2d(len(idx_i)).astype(np.float32)
         x_i = x[idx_i].astype(np.float32)
         translate_i = -np.mean(x_i, axis=0)
+
+        device = devices[len(patch_xs) % len(devices)]
+                
         scale_i = np.array([1.0 / np.max(np.linalg.norm(x_i + translate_i, axis=1))], dtype=np.float32)
         rotate_i, _, _ = np.linalg.svd((x_i + translate_i).T, full_matrices=False)
         transform_i = (torch.from_numpy(translate_i).to(device),
@@ -98,7 +103,8 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
         patch_indexes.append(torch.from_numpy(idx_i))
         patch_uvs.append(torch.tensor(uv_i, device=device, requires_grad=True))
         patch_xs.append(x_i)
-
+        print("Computed patch with %d points" % x_i.shape[0])
+        
     for i in range(ctr_v.shape[0]):
         make_patch(ctr_v[i], ctr_n[i])
 
@@ -114,7 +120,110 @@ def compute_patches(x, n, r, c, angle_thresh=95.0, device='cpu'):
     return patch_indexes, patch_uvs, patch_xs, patch_transformations
 
 
+def patch_means(patch_pis, patch_uvs, patch_idx, patch_tx, phi, x):
+    """
+    Given a set of charts and pointwise correspondences between charts, compute the mean of the overlapping points in
+    each chart. This is used to denoise the Atlas after each chart has beeen individually fitted.
+    The charts may not agree exactly on their prediction, so we compute the mean predictions of overlapping charts
+    and fit each chart to that mean.
+
+    :param patch_pis: A list of correspondences between the 2D uv samples and the points in a neighborhood
+    :param patch_uvs: A list of tensors, each of shape [n_i, 2] of UV positions for the given patch
+    :param patch_idx: A list of tensors each of shape [n_i] containing the indices of the points in a neighborhood into
+                      the input point-cloud x (of shape [n, 3])
+    :param patch_tx: A list of tuples (t_i, s_i, r_i) of transformations (t_i is a translation, s_i is a scaling, and
+                     r_i is a rotation matrix) which map the points in a neighborhood to a centered and whitened point
+                     set
+    :param phi: A list of neural networks representing the lifting function for each chart in the atlas
+    :param x: A [n, 3] tensor containing the input point cloud
+    :return: A list of tensors, each of shape [n_i, 3] where each tensor is the average prediction of the overlapping
+             charts a the samples
+    """
+    num_patches = len(patch_uvs)
+
+    if isinstance(x, np.ndarray):
+        mean_pts = torch.from_numpy(x).to(patch_uvs[0])
+    elif torch.is_tensor(x):
+        mean_pts = x.clone()
+    else:
+        raise ValueError("Invalid type for x")
+
+    counts = torch.ones(x.shape[0], 1).to(mean_pts)
+
+    for i in range(num_patches):
+        translate_i, scale_i, rotate_i = patch_tx[i]
+
+        uv_i = patch_uvs[i]
+        y_i = ((phi[i](uv_i).squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i)
+        pi_i = patch_pis[i]
+        idx_i = patch_idx[i][pi_i]
+        
+        mean_pts[idx_i] += y_i.to(mean_pts)
+        counts[idx_i, :] += 1
+
+    mean_pts = mean_pts / counts
+
+    means = []
+    for i in range(num_patches):
+        idx_i = patch_idx[i]
+        translate_i, scale_i, rotate_i = patch_tx[i]
+        device_i = translate_i.device
+        m_i = scale_i * (mean_pts[idx_i].to(device_i) + translate_i) @ rotate_i
+        means.append(m_i)
+
+    return means
+
+
+def upsample_surface(patch_uvs, patch_tx, patch_models, devices, scale=1.0, num_samples=8, normal_samples=64,
+                     compute_normals=True):
+    vertices = []
+    normals = []
+    with torch.no_grad():
+        for i in range(len(patch_models)):
+            if (i + 1) % 10 == 0:
+                print("Upsamling %d/%d" % (i+1, len(patch_models)))
+
+            device = devices[i % len(devices)]
+
+            n = num_samples
+            translate_i, scale_i, rotate_i = (patch_tx[i][j].to(device) for j in range(len(patch_tx[i])))
+            uv_i = utils.meshgrid_from_lloyd_ts(patch_uvs[i].cpu().numpy(), n, scale=scale).astype(np.float32)
+            uv_i = torch.from_numpy(uv_i).to(patch_uvs[i])
+            y_i = patch_models[i](uv_i)
+
+            mesh_v = ((y_i.squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i).cpu().numpy()
+
+            if compute_normals:
+                mesh_f = utils.meshgrid_face_indices(n)
+                mesh_n = pcu.per_vertex_normals(mesh_v, mesh_f)
+                normals.append(mesh_n)
+
+            vertices.append(mesh_v)
+
+    vertices = np.concatenate(vertices, axis=0).astype(np.float32)
+    if compute_normals:
+        normals = np.concatenate(normals, axis=0).astype(np.float32)
+    else:
+        print("Fixing normals...")
+        normals = pcu.estimate_normals(vertices, k=normal_samples)
+
+    return vertices, normals
+
+
 def plot_reconstruction(x, patch_uvs, patch_tx, patch_models, scale=1.0):
+    """
+    Plot a dense, upsampled point cloud
+
+    :param x: A [n, 3] tensor containing the input point cloud
+    :param patch_uvs: A list of tensors, each of shape [n_i, 2] of UV positions for the given patch
+    :param patch_tx: A list of tuples (t_i, s_i, r_i) of transformations (t_i is a translation, s_i is a scaling, and
+                     r_i is a rotation matrix) which map the points in a neighborhood to a centered and whitened point
+                     set
+    :param patch_models: A list of neural networks representing the lifting function for each chart in the atlas
+    :param scale: Scale parameter to sample uv values from a smaller or larger subset of [0, 1]^2 (i.e. scale*[0, 1]^2)
+    :return: A list of tensors, each of shape [n_i, 3] where each tensor is the average prediction of the overlapping
+             charts a the samples
+    """
     from mayavi import mlab
 
     with torch.no_grad():
@@ -134,6 +243,12 @@ def plot_reconstruction(x, patch_uvs, patch_tx, patch_models, scale=1.0):
 
 
 def plot_patches(x, patch_idx):
+    """
+    Plot the points in each neighborhood in a different color.
+
+    :param x: A [n, 3] tensor containing the input point cloud
+    :param patch_idx: List of [n_i]-shaped tensors each indexing into x representing the points in a given neighborhood.
+    """
     from mayavi import mlab
 
     mlab.figure(bgcolor=(1, 1, 1))
@@ -141,7 +256,7 @@ def plot_patches(x, patch_idx):
         color = tuple(np.random.rand(3))
         sf = 0.1 + np.random.randn()*0.05
         x_i = x[idx_i]
-        mlab.points3d(x_i[:, 0], x_i[:, 1], x_i[:, 2], color=color, scale_factor=sf)
+        mlab.points3d(x_i[:, 0], x_i[:, 1], x_i[:, 2], color=color, scale_factor=sf, scale_mode="none")
     mlab.show()
 
 
@@ -150,31 +265,58 @@ def main():
     argparser.add_argument("mesh_filename", type=str, help="Point cloud to reconstruct")
     argparser.add_argument("radius", type=float, help="Patch radius (The parameter, r, in the paper)")
     argparser.add_argument("padding", type=float, help="Padding factor for patches (The parameter, c, in the paper)")
-    argparser.add_argument("--plot", action="store_true", help="Plot the output when done training")
+    argparser.add_argument("min_pts_per_patch", type=int,
+                           help="Minimum number of allowed points inside a patch used to not fit to "
+                                "patches with too little data")
+    argparser.add_argument("--output", "-o", type=str, default="out",
+                           help="Name for the output files: e.g. if you pass in --output out, the program will save "
+                                "a dense upsampled point-cloud named out.ply, and a file containing reconstruction "
+                                "metadata and model weights named out.pt. Default: out -- "
+                                "Note: the number of points per patch in the upsampled point cloud is 64 by default "
+                                "and can be set by specifying --upsamples-per-patch.")
+    argparser.add_argument("--upsamples-per-patch", "-nup", type=int, default=8,
+                           help="*Square root* of the number of upsamples per patch to generate in the output. i.e. if "
+                                "you pass in --upsamples-per-patch 8, there will be 64 upsamples per patch.")
     argparser.add_argument("--angle-threshold", "-a", type=float, default=95.0,
                            help="Threshold (in degrees) used to discard points in "
                                 "a patch whose normal is facing the wrong way.")
-    argparser.add_argument("--local-epochs", "-nl", type=int, default=512, help="Number of local fitting iterations")
-    argparser.add_argument("--global-epochs", "-ng", type=int, default=1024, help="Number of global fitting iterations")
-    argparser.add_argument("--learning-rate", "-lr", type=float, default=1e-3, help="Step size for gradient descent")
-    argparser.add_argument("--device", "-d", type=str, default="cuda",
-                           help="The device to use when fitting (either 'cpu' or 'cuda')")
+    argparser.add_argument("--local-epochs", "-nl", type=int, default=128,
+                           help="Number of fitting iterations done for each chart to its points")
+    argparser.add_argument("--global-epochs", "-ng", type=int, default=128,
+                           help="Number of fitting iterations done to make each chart agree "
+                                "with its neighboring charts")
+    argparser.add_argument("--learning-rate", "-lr", type=float, default=1e-3,
+                           help="Step size for gradient descent.")
+    argparser.add_argument("--devices", "-d", type=str, default=["cuda"], nargs="+",
+                           help="A list of devices on which to partition the models for each patch. For large inputs, "
+                                "reconstruction can be memory and compute intensive. Passing in multiple devices will "
+                                "split the load across these. E.g. --devices cuda:0 cuda:1 cuda:2")
+    argparser.add_argument("--plot", action="store_true",
+                           help="Plot the following intermediate states:. (1) patch neighborhoods, "
+                                "(2) Intermediate reconstruction before global consistency step, "
+                                "(3) Reconstruction after global consistency step. "
+                                "This flag is useful for debugging but does not scale well to large inputs.")
     argparser.add_argument("--interpolate", action="store_true",
-                           help="If set, then force all patches to agree with the input at overlapping points. "
+                           help="If set, then force all patches to agree with the input at overlapping points "
+                                "(i.e. the reconstruction will try to interpolate the input point cloud). "
                                 "Otherwise, we fit all patches to the average of overlapping patches at each point.")
     argparser.add_argument("--max-sinkhorn-iters", "-si", type=int, default=32,
                            help="Maximum number of Sinkhorn iterations")
     argparser.add_argument("--sinkhorn-epsilon", "-sl", type=float, default=1e-3,
-                           help="The reciprocal (1/lambda) of the sinkhorn regularization parameter.")
-    argparser.add_argument("--output", "-o", type=str, default="out.pt",
-                           help="Destination to save the output reconstruction. Note, the file produced by this script "
-                                "is not a mesh or a point cloud. To construct a dense point cloud, see upsample.py.")
+                           help="The reciprocal (1/lambda) of the Sinkhorn regularization parameter.")
     argparser.add_argument("--seed", "-s", type=int, default=-1,
                            help="Random seed to use when initializing network weights. "
                                 "If the seed not positive, a seed is selected at random.")
     argparser.add_argument("--exact-emd", "-e", action="store_true",
-                           help="Use exact optimal transport distance instead of sinkhorn")
-    argparser.add_argument("--use-best", action="store_true", help="Use the model with the lowest loss")
+                           help="Use exact optimal transport distance instead of sinkhorn. "
+                                "This will be slow and should not make a difference in the output")
+    argparser.add_argument("--use-best", action="store_true",
+                           help="Use the model with the lowest loss as the final result.")
+    argparser.add_argument("--normal-neighborhood-size", "-ns", type=int, default=64,
+                           help="Neighborhood size used to estimate the normals in the final dense point cloud. "
+                                "Default: 64")
+    argparser.add_argument("--save-pre-cc", action="store_true",
+                           help="Save a copy of the model before the cycle consistency step")
 
     args = argparser.parse_args()
 
@@ -185,11 +327,15 @@ def main():
         "patch_uvs": None,
         "patch_idx": None,
         "patch_txs": None,
+        "radius": args.radius,
+        "padding": args.padding,
+        "min_pts_per_patch": args.min_pts_per_patch,
+        "angle_threshold": args.angle_threshold,
         "interpolate": args.interpolate,
         "global_epochs": args.global_epochs,
         "local_epochs": args.local_epochs,
         "learning_rate": args.learning_rate,
-        "device": args.device,
+        "devices": args.devices,
         "sinkhorn_epsilon": args.sinkhorn_epsilon,
         "max_sinkhorn_iters": args.max_sinkhorn_iters,
         "seed": utils.seed_everything(args.seed),
@@ -201,9 +347,12 @@ def main():
     # Compute a set of neighborhood (patches) and a uv samples for each neighborhood. Store the result in a list
     # of pairs (uv_j, xi_j) where uv_j are 2D uv coordinates for the j^th patch, and xi_j are the indices into x of
     # the j^th patch. We will try to reconstruct a function phi, such that phi(uv_j) = x[xi_j].
+    print("Computing neighborhoods...")
     bbox_diag = np.linalg.norm(np.max(x, axis=0) - np.min(x, axis=0))
     patch_idx, patch_uvs, patch_xs, patch_tx = compute_patches(x, n, args.radius*bbox_diag, args.padding,
-                                                               args.angle_threshold, args.device)
+                                                               angle_thresh=args.angle_threshold,
+                                                               min_pts_per_patch=args.min_pts_per_patch,
+                                                               devices=args.devices)
     num_patches = len(patch_uvs)
     output_dict["patch_uvs"] = patch_uvs
     output_dict["patch_idx"] = patch_idx
@@ -213,8 +362,9 @@ def main():
         plot_patches(x, patch_idx)
 
     # Initialize one model per patch and convert the input data to a pytorch tensor
-    phi = nn.ModuleList([MLP(2, 3).to(args.device) for _ in range(num_patches)])
-    x = torch.from_numpy(x.astype(np.float32)).to(args.device)
+    print("Creating models...")
+    phi = nn.ModuleList([MLP(2, 3).to(args.devices[i % len(args.devices)]) for i in range(num_patches)])
+    # x = torch.from_numpy(x.astype(np.float32)).to(args.device)
 
     optimizer = torch.optim.Adam(phi.parameters(), lr=args.learning_rate)
     uv_optimizer = torch.optim.Adam(patch_uvs, lr=args.learning_rate)
@@ -233,11 +383,12 @@ def main():
     best_models = [None for _ in range(num_patches)]
     best_losses = [np.inf for _ in range(num_patches)]
 
+    print("Training local patches...")
     for epoch in range(args.local_epochs):
         optimizer.zero_grad()
         uv_optimizer.zero_grad()
 
-        sum_loss = torch.tensor([0.0]).to(args.device)
+        sum_loss = torch.tensor([0.0]).to(args.devices[0])
         epoch_start_time = time.time()
         for i in range(num_patches):
             uv_i = patch_uvs[i]
@@ -248,7 +399,7 @@ def main():
                 if args.exact_emd:
                     M_i = pairwise_distances(x_i.unsqueeze(0), y_i.unsqueeze(0)).squeeze().cpu().squeeze().numpy()
                     p_i = ot.emd(np.ones(x_i.shape[0]), np.ones(y_i.shape[0]), M_i)
-                    p_i = torch.from_numpy(p_i.astype(np.float32)).to(args.device)
+                    p_i = torch.from_numpy(p_i.astype(np.float32)).to(args.devices[0])
                 else:
                     _, p_i = sinkhorn_loss(x_i.unsqueeze(0), y_i.unsqueeze(0))
                 pi_i = p_i.squeeze().max(0)[1]
@@ -260,7 +411,7 @@ def main():
                 best_losses[i] = loss_i
                 best_models[i] = copy.deepcopy(phi[i].state_dict())
 
-            sum_loss += loss_i
+            sum_loss += loss_i.to(args.devices[0])
 
         sum_loss.backward()
         epoch_end_time = time.time()
@@ -275,19 +426,26 @@ def main():
         for i, phi_i in enumerate(phi):
             phi_i.load_state_dict(best_models[i])
 
-    output_dict["pre_cycle_consistency_model"] = copy.deepcopy(phi.state_dict())
+    if args.save_pre_cc:
+        output_dict["pre_cycle_consistency_model"] = copy.deepcopy(phi.state_dict())
 
     if args.plot:
-        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=0.8)
+        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=1.0/args.padding)
 
     # Do a second, global, stage of fitting where we ask all patches to agree with each other on overlapping points.
     # If the user passed --interpolate, we ask that the patches agree on the original input points, otherwise we ask
     # that they agree on the average of predictions from patches overlapping a given point.
+    if not args.interpolate:
+        print("Computing patch means...")
+        with torch.no_grad():
+            patch_xs = patch_means(pi, patch_uvs, patch_idx, patch_tx, phi, x)
+
+    print("Training cycle consistency...")
     for epoch in range(args.global_epochs):
         optimizer.zero_grad()
         uv_optimizer.zero_grad()
 
-        sum_loss = torch.tensor([0.0]).to(args.device)
+        sum_loss = torch.tensor([0.0]).to(args.devices[0])
         epoch_start_time = time.time()
         for i in range(num_patches):
             uv_i = patch_uvs[i]
@@ -300,7 +458,7 @@ def main():
                 best_losses[i] = loss_i
                 best_models[i] = copy.deepcopy(phi[i].state_dict())
 
-            sum_loss += loss_i
+            sum_loss += loss_i.to(args.devices[0])
 
         sum_loss.backward()
         epoch_end_time = time.time()
@@ -314,12 +472,23 @@ def main():
     for i, phi_i in enumerate(phi):
         phi_i.load_state_dict(best_models[i])
 
-    output_dict["final_model"] = copy.deepcopy(phi.state_dict())
+    output_dict["final_model"] = phi.state_dict()
 
-    torch.save(output_dict, args.output)
+    print("Generating dense point cloud...")
+    v, n = upsample_surface(patch_uvs, patch_tx, phi, args.devices,
+                            scale=(1.0/args.padding),
+                            num_samples=args.upsamples_per_patch,
+                            normal_samples=args.normal_neighborhood_size,
+                            compute_normals=False)
+
+    print("Saving dense point cloud...")
+    pcu.write_ply(args.output + ".ply", v, np.zeros([], dtype=np.int32), n, np.zeros([], dtype=v.dtype))
+
+    print("Saving metadata...")
+    torch.save(output_dict, args.output + ".pt")
 
     if args.plot:
-        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=0.8)
+        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=1.0/args.padding)
 
 
 if __name__ == "__main__":
