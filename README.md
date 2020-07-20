@@ -1,7 +1,3 @@
-**This is a fork of deep-geo-prior repo** with an attempt to train the  N neural networks (each one predicting a 3d patch) in batches on single gpu. Test it with the following command:
-```shell
-python3  reconst_batches.py deep_geometric_prior_data/scans/lord_quas.ply 0.01 1.0 10 -d cuda:0 -nl 128 -ng 128 -o lord_quas_batched -bs 250
-```
 # Deep Geometric Prior for Surface Reconstruction
 The reference implementaiton for the CVPR 2019 paper [Deep Geometric Prior for Surface Reconstruction](https://arxiv.org/pdf/1811.10943.pdf).
 
@@ -75,7 +71,6 @@ python reconstruct_surface.py deep_geometric_prior_data/scans/anchor.ply 0.01 1.
 
 python reconstruct_surface.py deep_geometric_prior_data/scans/daratech.ply 0.01 1.0 10 -d cuda:0 cuda:1 cuda:2 cuda:3 -nl 25 -ng 25 -o daratech   
 ```
-
-*NOTE:* You may need to change the paths `deep_geometric_prior_data/scans/*.ply` to point to where you extracted the zip file, and you may need to change the device arguments `-d cuda:0 ...` to adapt to your system.
+*NOTE:* You may need to change the paths `deep_geometric_prior_data/scans/*.ply` to point to where you extracted the zip file, and you may need to change the device arguments `-d cuda:0 ...` to adapt to your system. To avoid `CUDA out of memory` error use the reconstruction in batches `--batch-size`.
 
 Each of the above commands produces a `ply` file and `pt` file (e.g. `anchor.ply`, `anchor.pt`). The PLY file contains a dense upsampled point cloud and the PT file contains metadata about the reconstruction. You can use the PT file to perform further operations using example `export_point_cloud.py`. 
