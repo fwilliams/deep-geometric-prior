@@ -262,6 +262,8 @@ def plot_reconstruction(x, patch_uvs, patch_tx, patch_models, scale=1.0):
     :return: A list of tensors, each of shape [n_i, 3] where each tensor is the average prediction of the overlapping
              charts a the samples
     """
+    raise NotImplementedError("Plotting is currently broken. It was really only useful for debugging. 
+                               If you need this code, file an issue.")
     from mayavi import mlab
 
     with torch.no_grad():
@@ -287,6 +289,9 @@ def plot_patches(x, patch_idx):
     :param x: A [n, 3] tensor containing the input point cloud
     :param patch_idx: List of [n_i]-shaped tensors each indexing into x representing the points in a given neighborhood.
     """
+    raise NotImplementedError("Plotting is currently broken. It was really only useful for debugging. 
+                               If you need this code, file an issue.")
+
     from mayavi import mlab
 
     mlab.figure(bgcolor=(1, 1, 1))
@@ -330,9 +335,9 @@ def main():
     argparser.add_argument("--angle-threshold", "-a", type=float, default=95.0,
                            help="Threshold (in degrees) used to discard points in "
                                 "a patch whose normal is facing the wrong way.")
-    argparser.add_argument("--local-epochs", "-nl", type=int, default=128,
+    argparser.add_argument("--local-epochs", "-nl", type=int, default=25,
                            help="Number of fitting iterations done for each chart to its points")
-    argparser.add_argument("--global-epochs", "-ng", type=int, default=128,
+    argparser.add_argument("--global-epochs", "-ng", type=int, default=25,
                            help="Number of fitting iterations done to make each chart agree "
                                 "with its neighboring charts")
     argparser.add_argument("--learning-rate", "-lr", type=float, default=1e-3,
@@ -341,11 +346,11 @@ def main():
                            help="A list of devices on which to partition the models for each patch. For large inputs, "
                                 "reconstruction can be memory and compute intensive. Passing in multiple devices will "
                                 "split the load across these. E.g. --devices cuda:0 cuda:1 cuda:2")
-    argparser.add_argument("--plot", action="store_true",
-                           help="Plot the following intermediate states:. (1) patch neighborhoods, "
-                                "(2) Intermediate reconstruction before global consistency step, "
-                                "(3) Reconstruction after global consistency step. "
-                                "This flag is useful for debugging but does not scale well to large inputs.")
+    # argparser.add_argument("--plot", action="store_true",
+    #                        help="Plot the following intermediate states:. (1) patch neighborhoods, "
+    #                             "(2) Intermediate reconstruction before global consistency step, "
+    #                             "(3) Reconstruction after global consistency step. "
+    #                             "This flag is useful for debugging but does not scale well to large inputs.")
     argparser.add_argument("--interpolate", action="store_true",
                            help="If set, then force all patches to agree with the input at overlapping points "
                                 "(i.e. the reconstruction will try to interpolate the input point cloud). "
