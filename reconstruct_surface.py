@@ -120,7 +120,7 @@ def compute_patches(x, n, r, c, angle_thresh=95.0,  min_pts_per_patch=10, device
     return patch_indexes, patch_uvs, patch_xs, patch_transformations
 
 
-def patch_means(patch_pis, patch_uvs, patch_idx, patch_tx, phi, x):
+def patch_means(patch_pis, patch_uvs, patch_idx, patch_tx, phi, x, devices, num_batches):
     """
     Given a set of charts and pointwise correspondences between charts, compute the mean of the overlapping points in
     each chart. This is used to denoise the Atlas after each chart has beeen individually fitted.
@@ -136,10 +136,13 @@ def patch_means(patch_pis, patch_uvs, patch_idx, patch_tx, phi, x):
                      set
     :param phi: A list of neural networks representing the lifting function for each chart in the atlas
     :param x: A [n, 3] tensor containing the input point cloud
+    :param devices: A list of devices which the models, phi, will be run on
+    :param num_batches: The number of batches on which to perform the evaluation on
     :return: A list of tensors, each of shape [n_i, 3] where each tensor is the average prediction of the overlapping
              charts a the samples
     """
     num_patches = len(patch_uvs)
+    batch_size = int(np.ceil(num_patches / num_batches))
 
     if isinstance(x, np.ndarray):
         mean_pts = torch.from_numpy(x).to(patch_uvs[0])
@@ -150,16 +153,35 @@ def patch_means(patch_pis, patch_uvs, patch_idx, patch_tx, phi, x):
 
     counts = torch.ones(x.shape[0], 1).to(mean_pts)
 
-    for i in range(num_patches):
-        translate_i, scale_i, rotate_i = patch_tx[i]
+    for b in range(num_batches):
+        start_idx = b * batch_size
+        end_idx = min((b + 1) * batch_size, num_patches)
+        for i in range(start_idx, end_idx):
+            dev_i = devices[i % len(devices)]
+            phi[i] = phi[i].to(dev_i)
+            patch_uvs[i] = patch_uvs[i].to(dev_i)
+            patch_pis[i] = patch_pis[i].to(dev_i)
+            patch_idx[i] = patch_idx[i].to(dev_i)
+            patch_tx[i] = tuple(txj.to(dev_i) for txj in patch_tx[i])
+                
+        for i in range(start_idx, end_idx):
+            translate_i, scale_i, rotate_i = patch_tx[i]
 
-        uv_i = patch_uvs[i]
-        y_i = ((phi[i](uv_i).squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i)
-        pi_i = patch_pis[i]
-        idx_i = patch_idx[i][pi_i]
+            uv_i = patch_uvs[i]
+            y_i = ((phi[i](uv_i).squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i)
+            pi_i = patch_pis[i]
+            idx_i = patch_idx[i][pi_i]
         
-        mean_pts[idx_i] += y_i.to(mean_pts)
-        counts[idx_i, :] += 1
+            mean_pts[idx_i] += y_i.to(mean_pts)
+            counts[idx_i, :] += 1
+            
+        for i in range(start_idx, end_idx):
+            dev_i = 'cpu'
+            phi[i] = phi[i].to(dev_i)
+            patch_uvs[i] = patch_uvs[i].to(dev_i)
+            patch_pis[i] = patch_pis[i].to(dev_i)
+            patch_idx[i] = patch_idx[i].to(dev_i)
+            patch_tx[i] = tuple(txj.to(dev_i) for txj in patch_tx[i])
 
     mean_pts = mean_pts / counts
 
@@ -175,30 +197,46 @@ def patch_means(patch_pis, patch_uvs, patch_idx, patch_tx, phi, x):
 
 
 def upsample_surface(patch_uvs, patch_tx, patch_models, devices, scale=1.0, num_samples=8, normal_samples=64,
-                     compute_normals=True):
+                     num_batches=1, compute_normals=True):
     vertices = []
     normals = []
+    num_patches = len(patch_models)
+    batch_size = int(np.ceil(num_patches / num_batches))
     with torch.no_grad():
-        for i in range(len(patch_models)):
-            if (i + 1) % 10 == 0:
-                print("Upsamling %d/%d" % (i+1, len(patch_models)))
+        for b in range(num_batches):
+            start_idx = b * batch_size
+            end_idx = min((b + 1) * batch_size, num_patches)
+            for i in range(start_idx, end_idx):
+                dev_i = devices[i % len(devices)]
+                patch_models[i] = patch_models[i].to(dev_i)
+                patch_uvs[i] = patch_uvs[i].to(dev_i)
+                patch_tx[i] = tuple(txj.to(dev_i) for txj in patch_tx[i])
+                
+            for i in range(start_idx, end_idx):
+                if (i + 1) % 10 == 0:
+                    print("Upsamling %d/%d" % (i + 1, len(patch_models)))
 
-            device = devices[i % len(devices)]
+                device = devices[i % len(devices)]
 
-            n = num_samples
-            translate_i, scale_i, rotate_i = (patch_tx[i][j].to(device) for j in range(len(patch_tx[i])))
-            uv_i = utils.meshgrid_from_lloyd_ts(patch_uvs[i].cpu().numpy(), n, scale=scale).astype(np.float32)
-            uv_i = torch.from_numpy(uv_i).to(patch_uvs[i])
-            y_i = patch_models[i](uv_i)
+                n = num_samples
+                translate_i, scale_i, rotate_i = (patch_tx[i][j].to(device) for j in range(len(patch_tx[i])))
+                uv_i = utils.meshgrid_from_lloyd_ts(patch_uvs[i].cpu().numpy(), n, scale=scale).astype(np.float32)
+                uv_i = torch.from_numpy(uv_i).to(patch_uvs[i])
+                y_i = patch_models[i](uv_i)
 
-            mesh_v = ((y_i.squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i).cpu().numpy()
+                mesh_v = ((y_i.squeeze() @ rotate_i.transpose(0, 1)) / scale_i - translate_i).cpu().numpy()
+            
+                if compute_normals:
+                    mesh_f = utils.meshgrid_face_indices(n)
+                    mesh_n = pcu.per_vertex_normals(mesh_v, mesh_f)
+                    normals.append(mesh_n)
 
-            if compute_normals:
-                mesh_f = utils.meshgrid_face_indices(n)
-                mesh_n = pcu.per_vertex_normals(mesh_v, mesh_f)
-                normals.append(mesh_n)
-
-            vertices.append(mesh_v)
+                vertices.append(mesh_v)
+            for i in range(start_idx, end_idx):
+                dev_i = 'cpu'
+                patch_models[i] = patch_models[i].to(dev_i)
+                patch_uvs[i] = patch_uvs[i].to(dev_i)
+                patch_tx[i] = tuple(txj.to(dev_i) for txj in patch_tx[i])
 
     vertices = np.concatenate(vertices, axis=0).astype(np.float32)
     if compute_normals:
@@ -224,6 +262,8 @@ def plot_reconstruction(x, patch_uvs, patch_tx, patch_models, scale=1.0):
     :return: A list of tensors, each of shape [n_i, 3] where each tensor is the average prediction of the overlapping
              charts a the samples
     """
+    raise NotImplementedError("Plotting is currently broken. It was really only useful for debugging. 
+                               If you need this code, file an issue.")
     from mayavi import mlab
 
     with torch.no_grad():
@@ -249,6 +289,9 @@ def plot_patches(x, patch_idx):
     :param x: A [n, 3] tensor containing the input point cloud
     :param patch_idx: List of [n_i]-shaped tensors each indexing into x representing the points in a given neighborhood.
     """
+    raise NotImplementedError("Plotting is currently broken. It was really only useful for debugging. 
+                               If you need this code, file an issue.")
+
     from mayavi import mlab
 
     mlab.figure(bgcolor=(1, 1, 1))
@@ -258,6 +301,18 @@ def plot_patches(x, patch_idx):
         x_i = x[idx_i]
         mlab.points3d(x_i[:, 0], x_i[:, 1], x_i[:, 2], color=color, scale_factor=sf, scale_mode="none")
     mlab.show()
+
+    
+def move_optimizer_to_device(optimizer, device):
+    state_devices = {}
+    for i, state in enumerate(optimizer.state.values()):
+        for k, v in state.items():
+            if torch.is_tensor(v):
+                key = k + "-" + str(i)
+                dev = device[key] if isinstance(device, dict) else device
+                state_devices[key] = v.device
+                state[k] = v.to(dev)
+    return state_devices
 
 
 def main():
@@ -280,9 +335,9 @@ def main():
     argparser.add_argument("--angle-threshold", "-a", type=float, default=95.0,
                            help="Threshold (in degrees) used to discard points in "
                                 "a patch whose normal is facing the wrong way.")
-    argparser.add_argument("--local-epochs", "-nl", type=int, default=128,
+    argparser.add_argument("--local-epochs", "-nl", type=int, default=25,
                            help="Number of fitting iterations done for each chart to its points")
-    argparser.add_argument("--global-epochs", "-ng", type=int, default=128,
+    argparser.add_argument("--global-epochs", "-ng", type=int, default=25,
                            help="Number of fitting iterations done to make each chart agree "
                                 "with its neighboring charts")
     argparser.add_argument("--learning-rate", "-lr", type=float, default=1e-3,
@@ -291,11 +346,11 @@ def main():
                            help="A list of devices on which to partition the models for each patch. For large inputs, "
                                 "reconstruction can be memory and compute intensive. Passing in multiple devices will "
                                 "split the load across these. E.g. --devices cuda:0 cuda:1 cuda:2")
-    argparser.add_argument("--plot", action="store_true",
-                           help="Plot the following intermediate states:. (1) patch neighborhoods, "
-                                "(2) Intermediate reconstruction before global consistency step, "
-                                "(3) Reconstruction after global consistency step. "
-                                "This flag is useful for debugging but does not scale well to large inputs.")
+    # argparser.add_argument("--plot", action="store_true",
+    #                        help="Plot the following intermediate states:. (1) patch neighborhoods, "
+    #                             "(2) Intermediate reconstruction before global consistency step, "
+    #                             "(3) Reconstruction after global consistency step. "
+    #                             "This flag is useful for debugging but does not scale well to large inputs.")
     argparser.add_argument("--interpolate", action="store_true",
                            help="If set, then force all patches to agree with the input at overlapping points "
                                 "(i.e. the reconstruction will try to interpolate the input point cloud). "
@@ -317,7 +372,7 @@ def main():
                                 "Default: 64")
     argparser.add_argument("--save-pre-cc", action="store_true",
                            help="Save a copy of the model before the cycle consistency step")
-
+    argparser.add_argument("--batch-size", type=int, default=-1, help="Split fitting MLPs into batches")
     args = argparser.parse_args()
 
     # We'll populate this dictionary and save it as output
@@ -339,6 +394,7 @@ def main():
         "sinkhorn_epsilon": args.sinkhorn_epsilon,
         "max_sinkhorn_iters": args.max_sinkhorn_iters,
         "seed": utils.seed_everything(args.seed),
+        "batch_size": args.batch_size
     }
 
     # Read a point cloud and normals from a file, center it about its mean, and align it along its principle vectors
@@ -351,8 +407,7 @@ def main():
     bbox_diag = np.linalg.norm(np.max(x, axis=0) - np.min(x, axis=0))
     patch_idx, patch_uvs, patch_xs, patch_tx = compute_patches(x, n, args.radius*bbox_diag, args.padding,
                                                                angle_thresh=args.angle_threshold,
-                                                               min_pts_per_patch=args.min_pts_per_patch,
-                                                               devices=args.devices)
+                                                               min_pts_per_patch=args.min_pts_per_patch)
     num_patches = len(patch_uvs)
     output_dict["patch_uvs"] = patch_uvs
     output_dict["patch_idx"] = patch_idx
@@ -363,10 +418,18 @@ def main():
 
     # Initialize one model per patch and convert the input data to a pytorch tensor
     print("Creating models...")
-    phi = nn.ModuleList([MLP(2, 3).to(args.devices[i % len(args.devices)]) for i in range(num_patches)])
+    if args.batch_size > 0:
+        num_batches = int(np.ceil(num_patches / args.batch_size))
+        batch_size = args.batch_size
+        print("Splitting fitting into %d batches" % num_batches)
+    else:
+        num_batches = 1
+        batch_size = num_patches
+    phi = nn.ModuleList([MLP(2, 3) for i in range(num_patches)])
     # x = torch.from_numpy(x.astype(np.float32)).to(args.device)
 
-    optimizer = torch.optim.Adam(phi.parameters(), lr=args.learning_rate)
+    phi_optimizers = []
+    phi_optimizers_devices = []
     uv_optimizer = torch.optim.Adam(patch_uvs, lr=args.learning_rate)
     sinkhorn_loss = SinkhornLoss(max_iters=args.max_sinkhorn_iters, return_transport_matrix=True)
     mse_loss = nn.MSELoss()
@@ -384,44 +447,75 @@ def main():
     best_losses = [np.inf for _ in range(num_patches)]
 
     print("Training local patches...")
-    for epoch in range(args.local_epochs):
-        optimizer.zero_grad()
-        uv_optimizer.zero_grad()
+    for b in range(num_batches):
+        print("Fitting batch %d/%d" % (b + 1, num_batches))
+        start_idx = b * batch_size
+        end_idx = min((b + 1) * batch_size, num_patches)
+        optimizer_batch = torch.optim.Adam(phi[start_idx:end_idx].parameters(), lr=args.learning_rate)
+        phi_optimizers.append(optimizer_batch)
+        for i in range(start_idx, end_idx):
+            dev_i = args.devices[i % len(args.devices)]
+            phi[i] = phi[i].to(dev_i)
+            patch_uvs[i] = patch_uvs[i].to(dev_i)
+            patch_xs[i] = patch_xs[i].to(dev_i)
+            
+        for epoch in range(args.local_epochs):
+            optimizer_batch.zero_grad()
+            uv_optimizer.zero_grad()
 
-        sum_loss = torch.tensor([0.0]).to(args.devices[0])
-        epoch_start_time = time.time()
-        for i in range(num_patches):
-            uv_i = patch_uvs[i]
-            x_i = patch_xs[i]
-            y_i = phi[i](uv_i)
+            # sum_loss = torch.tensor([0.0]).to(args.devices[0])
+            losses = []
+            torch.cuda.synchronize()
+            epoch_start_time = time.time()
+            for i in range(start_idx, end_idx):
+                uv_i = patch_uvs[i]
+                x_i = patch_xs[i]
+                y_i = phi[i](uv_i)
 
-            with torch.no_grad():
-                if args.exact_emd:
-                    M_i = pairwise_distances(x_i.unsqueeze(0), y_i.unsqueeze(0)).squeeze().cpu().squeeze().numpy()
-                    p_i = ot.emd(np.ones(x_i.shape[0]), np.ones(y_i.shape[0]), M_i)
-                    p_i = torch.from_numpy(p_i.astype(np.float32)).to(args.devices[0])
-                else:
-                    _, p_i = sinkhorn_loss(x_i.unsqueeze(0), y_i.unsqueeze(0))
-                pi_i = p_i.squeeze().max(0)[1]
-                pi[i] = pi_i
+                with torch.no_grad():
+                    if args.exact_emd:
+                        M_i = pairwise_distances(x_i.unsqueeze(0), y_i.unsqueeze(0)).squeeze().cpu().squeeze().numpy()
+                        p_i = ot.emd(np.ones(x_i.shape[0]), np.ones(y_i.shape[0]), M_i)
+                        p_i = torch.from_numpy(p_i.astype(np.float32)).to(args.devices[0])
+                    else:
+                        _, p_i = sinkhorn_loss(x_i.unsqueeze(0), y_i.unsqueeze(0))
+                    pi_i = p_i.squeeze().max(0)[1]
+                    pi[i] = pi_i
 
-            loss_i = mse_loss(x_i[pi_i].unsqueeze(0), y_i.unsqueeze(0))
+                loss_i = mse_loss(x_i[pi_i].unsqueeze(0), y_i.unsqueeze(0))
 
-            if args.use_best and loss_i.item() < best_losses[i]:
-                best_losses[i] = loss_i
-                best_models[i] = copy.deepcopy(phi[i].state_dict())
+                if args.use_best and loss_i.item() < best_losses[i]:
+                    best_losses[i] = loss_i.item()
+                    model_copy = copy.deepcopy(phi[i]).to('cpu')
+                    best_models[i] = copy.deepcopy(model_copy.state_dict())
+                loss_i.backward()
+                losses.append(loss_i)
+                # sum_loss += loss_i.to(args.devices[0])
 
-            sum_loss += loss_i.to(args.devices[0])
+            # sum_loss.backward()
+            sum_loss = sum([l.item() for l in losses])
+            torch.cuda.synchronize()
+            epoch_end_time = time.time()
 
-        sum_loss.backward()
-        epoch_end_time = time.time()
+            print("%d/%d: [Total = %0.5f] [Mean = %0.5f] [Time = %0.3f]" %
+                  (epoch, args.local_epochs, sum_loss,
+                   sum_loss / (end_idx - start_idx), epoch_end_time - epoch_start_time))
+            optimizer_batch.step()
+            uv_optimizer.step()
+            
+        for i in range(start_idx, end_idx):
+            dev_i = 'cpu'
+            phi[i] = phi[i].to(dev_i)
+            patch_uvs[i] = patch_uvs[i].to(dev_i)
+            patch_xs[i] = patch_xs[i].to(dev_i)
+            pi[i] = pi[i].to(dev_i)
+        optimizer_batch_devices = move_optimizer_to_device(optimizer_batch, 'cpu')
+        phi_optimizers_devices.append(optimizer_batch_devices)
+                    
+        print("Done batch %d/%d" % (b + 1, num_batches))
 
-        print("%d/%d: [Total = %0.5f] [Mean = %0.5f] [Time = %0.3f]" %
-              (epoch, args.local_epochs, sum_loss.item(),
-               sum_loss.item() / num_patches, epoch_end_time-epoch_start_time))
-        optimizer.step()
-        uv_optimizer.step()
-
+    print("Mean best losses:", np.mean(best_losses[i]))
+    
     if args.use_best:
         for i, phi_i in enumerate(phi):
             phi_i.load_state_dict(best_models[i])
@@ -430,6 +524,7 @@ def main():
         output_dict["pre_cycle_consistency_model"] = copy.deepcopy(phi.state_dict())
 
     if args.plot:
+        raise NotImplementedError("TODO: Fix plotting code")
         plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=1.0/args.padding)
 
     # Do a second, global, stage of fitting where we ask all patches to agree with each other on overlapping points.
@@ -438,37 +533,58 @@ def main():
     if not args.interpolate:
         print("Computing patch means...")
         with torch.no_grad():
-            patch_xs = patch_means(pi, patch_uvs, patch_idx, patch_tx, phi, x)
+            patch_xs = patch_means(pi, patch_uvs, patch_idx, patch_tx, phi, x, args.devices, num_batches)
 
     print("Training cycle consistency...")
-    for epoch in range(args.global_epochs):
-        optimizer.zero_grad()
-        uv_optimizer.zero_grad()
+    for b in range(num_batches):
+        print("Fitting batch %d/%d" % (b + 1, num_batches))
+        start_idx = b * batch_size
+        end_idx = min((b + 1) * batch_size, num_patches)
+        for i in range(start_idx, end_idx):
+            dev_i = args.devices[i % len(args.devices)]
+            phi[i] = phi[i].to(dev_i)
+            patch_uvs[i] = patch_uvs[i].to(dev_i)
+            patch_xs[i] = patch_xs[i].to(dev_i)
+            pi[i] = pi[i].to(dev_i)
+        optimizer = phi_optimizers[b]
+        move_optimizer_to_device(optimizer, phi_optimizers_devices[b])
+        for epoch in range(args.global_epochs):
+            optimizer.zero_grad()
+            uv_optimizer.zero_grad()
 
-        sum_loss = torch.tensor([0.0]).to(args.devices[0])
-        epoch_start_time = time.time()
-        for i in range(num_patches):
-            uv_i = patch_uvs[i]
-            x_i = patch_xs[i]
-            y_i = phi[i](uv_i)
-            pi_i = pi[i]
-            loss_i = mse_loss(x_i[pi_i].unsqueeze(0), y_i.unsqueeze(0))
+            sum_loss = torch.tensor([0.0]).to(args.devices[0])
+            epoch_start_time = time.time()
+            for i in range(start_idx, end_idx):
+                uv_i = patch_uvs[i]
+                x_i = patch_xs[i]
+                y_i = phi[i](uv_i)
+                pi_i = pi[i]
+                loss_i = mse_loss(x_i[pi_i].unsqueeze(0), y_i.unsqueeze(0))
 
-            if loss_i.item() < best_losses[i]:
-                best_losses[i] = loss_i
-                best_models[i] = copy.deepcopy(phi[i].state_dict())
+                if loss_i.item() < best_losses[i]:
+                    best_losses[i] = loss_i.item()
+                    model_copy = copy.deepcopy(phi[i]).to('cpu')
+                    best_models[i] = copy.deepcopy(model_copy.state_dict())
 
-            sum_loss += loss_i.to(args.devices[0])
+                sum_loss += loss_i.to(args.devices[0])
 
-        sum_loss.backward()
-        epoch_end_time = time.time()
+            sum_loss.backward()
+            epoch_end_time = time.time()
 
-        print("%d/%d: [Total = %0.5f] [Mean = %0.5f] [Time = %0.3f]" %
-              (epoch, args.global_epochs, sum_loss.item(),
-               sum_loss.item() / num_patches, epoch_end_time-epoch_start_time))
-        optimizer.step()
-        uv_optimizer.step()
-
+            print("%d/%d: [Total = %0.5f] [Mean = %0.5f] [Time = %0.3f]" %
+                  (epoch, args.global_epochs, sum_loss.item(),
+                   sum_loss.item() / (end_idx - start_idx), epoch_end_time-epoch_start_time))
+            optimizer.step()
+            uv_optimizer.step()
+        for i in range(start_idx, end_idx):
+            dev_i = 'cpu'
+            phi[i] = phi[i].to(dev_i)
+            patch_uvs[i] = patch_uvs[i].to(dev_i)
+            patch_xs[i] = patch_xs[i].to(dev_i)
+            pi[i] = pi[i].to(dev_i)
+        move_optimizer_to_device(optimizer, 'cpu')
+                    
+    print("Mean best losses:", np.mean(best_losses[i]))
     for i, phi_i in enumerate(phi):
         phi_i.load_state_dict(best_models[i])
 
@@ -479,6 +595,7 @@ def main():
                             scale=(1.0/args.padding),
                             num_samples=args.upsamples_per_patch,
                             normal_samples=args.normal_neighborhood_size,
+                            num_batches=num_batches,
                             compute_normals=False)
 
     print("Saving dense point cloud...")
