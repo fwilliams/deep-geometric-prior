@@ -9,16 +9,15 @@ There are several programs in this repository explained in detail below. The doc
 - #### `reconstruct_surface.py`:
   Compute a set of patches which represent a surface. 
 
-  This program produces a file (defaulting to `out.pt`) as output which can be used to upsample a point cloud with `export_point_cloud.py`. You can optionally plot the reconstruction with `plot_reconstruction.py`.
+  This program produces a dense point cloud (`out.ply` by default) and a binary file file (`out.pt` by default) which can be used to regenerate the dense point cloud with `export_point_cloud.py` (this is useful for example, if you want to try different sampling densities).
    
 - #### `reconstruct_single_patch.py` 
-  Compute a single surface patch fitted to a point cloud.
+  Compute a single surface patch fitted to a point cloud. 
 
   As with `reconstruct_surface.py`, this program produces a file (defaulting to `out.pt`) as output which can be used to upsample a point cloud with `export_point_cloud.py`. You can optionally plot the reconstruction with `plot_reconstruction.py`.
    
 - #### `export_point_cloud.py` 
-  Exports a dense point cloud from a reconstruction file produced by `reconstruct_surface.py` or `reconstruct_single_patch,py`. 
-  This can be fed into a standard algorithm such as [Screened Poisson Surface Reconstruction](https://github.com/mkazhdan/PoissonRecon) to extract a triangle mesh.
+  Exports a dense point cloud (`out.ply` by default) from a reconstruction the `.pt` binary file produced by `reconstruct_surface.py` or `reconstruct_single_patch,py`. 
 
 
 ## Setting up and Running the Code
@@ -45,6 +44,10 @@ If you are not using Conda, you can manually install the following dependencies:
 - [FML](https://github.com/fwilliams/fml) 0.1 (or later)
 - [Point Cloud Utils](https://github.com/fwilliams/point-cloud-utils) 0.12.0 (or later) 
 - [Mayavi](https://docs.enthought.com/mayavi/mayavi/) 4.6.2 (or later)
+
+
+## Reducing Memory Usage
+The Deep Geometric Prior trains an individual MLP for each surface patch in a model. Since there can be a lot of patches in a point cloud, this can lead to a high GPU memory usage when fitting all the MLPs in parallel. For this reason, we provide a `--batch-size` argument to `reconstruct_surface.py` which only fits `--batch-size` MLPs in parallel at once. If you run out of VRAM, try decreasing this parameter.
 
 
 ## [Surface Reconstruction Benchmark Data](https://drive.google.com/file/d/17Elfc1TTRzIQJhaNu5m7SckBH_mdjYSe/view?usp=sharing)
