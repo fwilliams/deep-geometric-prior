@@ -262,8 +262,8 @@ def plot_reconstruction(x, patch_uvs, patch_tx, patch_models, scale=1.0):
     :return: A list of tensors, each of shape [n_i, 3] where each tensor is the average prediction of the overlapping
              charts a the samples
     """
-    raise NotImplementedError("Plotting is currently broken. It was really only useful for debugging. 
-                               If you need this code, file an issue.")
+    raise NotImplementedError("Plotting is currently broken. It was really only useful for debugging. "
+                              "If you need this code, file an issue.")
     from mayavi import mlab
 
     with torch.no_grad():
@@ -289,8 +289,8 @@ def plot_patches(x, patch_idx):
     :param x: A [n, 3] tensor containing the input point cloud
     :param patch_idx: List of [n_i]-shaped tensors each indexing into x representing the points in a given neighborhood.
     """
-    raise NotImplementedError("Plotting is currently broken. It was really only useful for debugging. 
-                               If you need this code, file an issue.")
+    raise NotImplementedError("Plotting is currently broken. It was really only useful for debugging. "
+                              "If you need this code, file an issue.")
 
     from mayavi import mlab
 
@@ -413,8 +413,9 @@ def main():
     output_dict["patch_idx"] = patch_idx
     output_dict["patch_txs"] = patch_tx
 
-    if args.plot:
-        plot_patches(x, patch_idx)
+    # FIXME: Plotting is currently broken
+    # if args.plot:
+    #     plot_patches(x, patch_idx)
 
     # Initialize one model per patch and convert the input data to a pytorch tensor
     print("Creating models...")
@@ -523,9 +524,10 @@ def main():
     if args.save_pre_cc:
         output_dict["pre_cycle_consistency_model"] = copy.deepcopy(phi.state_dict())
 
-    if args.plot:
-        raise NotImplementedError("TODO: Fix plotting code")
-        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=1.0/args.padding)
+    # FIXME: Plotting is broken
+    # if args.plot:
+    #     raise NotImplementedError("TODO: Fix plotting code")
+    #     plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=1.0/args.padding)
 
     # Do a second, global, stage of fitting where we ask all patches to agree with each other on overlapping points.
     # If the user passed --interpolate, we ask that the patches agree on the original input points, otherwise we ask
@@ -604,8 +606,9 @@ def main():
     print("Saving metadata...")
     torch.save(output_dict, args.output + ".pt")
 
-    if args.plot:
-        plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=1.0/args.padding)
+    # FIXME: Plotting is currently broken
+    # if args.plot:
+    #     plot_reconstruction(x, patch_uvs, patch_tx, phi, scale=1.0/args.padding)
 
 
 if __name__ == "__main__":
